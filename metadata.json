@@ -1,0 +1,6 @@
+{
+  "name": "Pulse EMS Exercise Timer",
+  "description": "An installable medical-grade interval timer for EMS (electronic muscle stimulation) workouts with responsive waveforms, audio feedback, and wake lock support.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

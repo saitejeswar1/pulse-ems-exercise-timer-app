@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Pulse Timer</string>
+    <string name="title_activity_main">Pulse Timer</string>
+    <string name="package_name">com.myphysio.pulsetimer</string>
+    <string name="custom_url_scheme">com.myphysio.pulsetimer</string>
+</resources>

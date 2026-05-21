@@ -1,0 +1,20 @@
+{
+  "name": "Pulse EMS Exercise Timer",
+  "short_name": "Pulse",
+  "description": "An installable interval timer for EMS (electronic muscle stimulation) workouts with responsive waveforms, audio feedback, and haptics.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#090b0f",
+  "theme_color": "#090b0f",
+  "orientation": "portrait",
+  "lang": "en-US",
+  "dir": "ltr",
+  "icons": [
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

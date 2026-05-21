@@ -1,0 +1,47 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Outfit:wght@200;300;400;500;600;700;800&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Playfair Display", Georgia, Cambria, serif;
+  --font-display: "Outfit", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  
+  --color-natural-bg: #F7F5F2;
+  --color-natural-dark: #2D2D2A;
+  --color-natural-moss: #5A5A40;
+  --color-natural-terracotta: #D98C72;
+  --color-natural-peach: #EAD8D0;
+  --color-natural-border: #E5E5E0;
+}
+
+/* Base custom interactive states scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #F7F5F2;
+}
+::-webkit-scrollbar-thumb {
+  background: #E5E5E0;
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #5A5A4050;
+}
+
+.text-glow {
+  filter: drop-shadow(0 0 2px currentColor);
+}
+
+@keyframes scaleIn {
+  from {
+    transform: scale(0.85);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
