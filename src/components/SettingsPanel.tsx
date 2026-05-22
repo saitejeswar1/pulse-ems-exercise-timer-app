@@ -1,4 +1,4 @@
-import { WorkoutSettings, SoundMode, SoundTheme } from '../types';
+import { WorkoutSettings, SoundMode, ContinuousSound } from '../types';
 import { audio } from '../lib/audio';
 import { 
   Volume2, 
@@ -10,11 +10,7 @@ import {
   BellRing, 
   Activity, 
   Eye, 
-  FileText,
   Smartphone,
-  Gamepad2,
-  Compass,
-  Sparkles
 } from 'lucide-react';
 import { motion } from 'motion/react';
 
@@ -39,14 +35,18 @@ export default function SettingsPanel({ settings, onChange, onClose }: SettingsP
     audio.testSound(mode);
   };
 
-  const handleSoundThemeChange = (theme: SoundTheme) => {
-    const updated = { ...settings, soundTheme: theme };
-    onChange(updated);
-    // Instant premium audio theme preview
+  const handleContinuousSoundChange = (cs: ContinuousSound) => {
+    onChange({ ...settings, continuousSound: cs });
     audio.setVolume(settings.volume);
-    audio.setTheme(theme);
-    audio.playPhaseStart('active', 'beep');
+    audio.setContinuousSound(cs);
+    audio.testSound('continuous');
   };
+
+  const continuousSoundOptions: { value: ContinuousSound; label: string }[] = [
+    { value: 'drum-loop', label: 'Drum Loop — driving 120 BPM beat' },
+    { value: 'ambient-pad', label: 'Ambient Pad — warm sustained drone' },
+    { value: 'heartbeat', label: 'Heartbeat — rhythmic 60 BPM thumps' },
+  ];
 
   const handleTestSound = () => {
     audio.setVolume(settings.volume);
@@ -86,39 +86,6 @@ export default function SettingsPanel({ settings, onChange, onClose }: SettingsP
       title: 'Continuous Hum', 
       desc: 'Deep 220Hz EMS continuous muscle simulation pulse hum',
       icon: Zap
-    }
-  ];
-
-  const soundThemesList: { value: SoundTheme; title: string; desc: string; icon: any }[] = [
-    {
-      value: 'digital',
-      title: 'Digital Gym',
-      desc: 'Standard clean electronic beep chimes',
-      icon: BellRing
-    },
-    {
-      value: 'ems',
-      title: 'EMS Pulse',
-      desc: 'Authentic muscle stimulation contraction hums',
-      icon: Zap
-    },
-    {
-      value: 'synth',
-      title: 'Synth Workout',
-      desc: 'Upbeat dynamically synthesized techno beat',
-      icon: Music
-    },
-    {
-      value: 'zen',
-      title: 'Zen Temple',
-      desc: 'Meditative singing bowls & slow LFO drone washes',
-      icon: Compass
-    },
-    {
-      value: 'arcade',
-      title: 'Retro Arcade',
-      desc: 'Classic 8-bit laser beeps & arcade ditties',
-      icon: Gamepad2
     }
   ];
 
@@ -236,49 +203,27 @@ export default function SettingsPanel({ settings, onChange, onClose }: SettingsP
           })}
         </div>
 
-        {/* Premium Sound Themes & Tone Selection */}
-        <div className="flex flex-col gap-2.5 mt-3 border-t border-natural-border pt-4">
-          <div className="flex items-center gap-1.5">
-            <Sparkles className="w-3.5 h-3.5 text-natural-moss animate-pulse" />
-            <span className="text-sm font-semibold text-natural-dark">Sound Theme & Tone Library</span>
+        {/* Continuous-sound picker, only when Continuous Hum is selected */}
+        {settings.sound === 'continuous' && (
+          <div className="flex flex-col gap-2 mt-1 border-t border-natural-border pt-4">
+            <label htmlFor="continuous-sound-select" className="text-sm font-medium text-natural-dark">
+              Continuous Sound
+            </label>
+            <select
+              id="continuous-sound-select"
+              value={settings.continuousSound || 'drum-loop'}
+              onChange={(e) => handleContinuousSoundChange(e.target.value as ContinuousSound)}
+              className="w-full px-3 py-2.5 bg-natural-bg border border-natural-border rounded-xl text-sm text-natural-dark focus:outline-none focus:border-natural-moss cursor-pointer"
+            >
+              {continuousSoundOptions.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+            <p className="text-[11px] text-[#70706B] leading-relaxed">
+              Plays during the active phase. Three warning beeps fire in the last 3 seconds of both active and rest.
+            </p>
           </div>
-          <p className="text-[11px] text-[#70706B] leading-relaxed">
-            Select a synthesized theme below to completely replace the app's acoustic profile (beeps, countdowns, hums, and fanfare).
-          </p>
-
-          <div className="grid grid-cols-2 gap-2.5 mt-1">
-            {soundThemesList.map((t) => {
-              const isSelected = (settings.soundTheme || 'digital') === t.value;
-              const IconComponent = t.icon;
-              return (
-                <button
-                  key={t.value}
-                  id={`theme-btn-${t.value}`}
-                  onClick={() => handleSoundThemeChange(t.value)}
-                  className={`flex flex-col text-left p-3 rounded-xl border transition-all duration-150 cursor-pointer group ${
-                    t.value === 'arcade' ? 'col-span-2' : ''
-                  } ${
-                    isSelected 
-                      ? 'bg-natural-moss/10 border-natural-moss/40 text-natural-moss ring-2 ring-natural-moss/10' 
-                      : 'bg-natural-bg/50 hover:bg-natural-bg border-natural-border text-natural-dark'
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <div className={`p-1.5 rounded-md ${isSelected ? 'bg-natural-moss/15 text-natural-moss' : 'bg-white border border-natural-border text-natural-moss/60 group-hover:text-natural-moss transition'}`}>
-                      <IconComponent className="w-3.5 h-3.5" />
-                    </div>
-                    <span className="text-xs font-bold tracking-tight text-natural-dark">
-                      {t.title}
-                    </span>
-                  </div>
-                  <p className="text-[10px] text-[#757570] leading-snug mt-1.5">
-                    {t.desc}
-                  </p>
-                </button>
-              );
-            })}
-          </div>
-        </div>
+        )}
 
         {/* Volume setting */}
         <div className="flex flex-col gap-2 mt-2">
@@ -356,11 +301,6 @@ export default function SettingsPanel({ settings, onChange, onClose }: SettingsP
           </button>
         </div>
       </div>
-
-      <p className="text-center text-[11px] text-[#757570] mt-2 flex items-center justify-center gap-1">
-        <FileText className="w-3.5 h-3.5" />
-        Runs entirely inside local browser storage. No network telemetry transmitted.
-      </p>
 
     </div>
   );

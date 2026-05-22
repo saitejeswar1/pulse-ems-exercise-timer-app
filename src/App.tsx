@@ -1,10 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
-import { Play, Pause, RotateCcw, Clock, Dumbbell, TrendingUp, Settings as SettingsIcon, Check, Trophy, Heart, PlusCircle } from 'lucide-react';
+import { Play, Pause, RotateCcw, Clock, Dumbbell, TrendingUp, Settings as SettingsIcon, Check, Heart, PlusCircle } from 'lucide-react';
 import { WorkoutSettings, WorkoutPhase, PhysioExercise, WorkoutLogEntry } from './types';
 import { audio } from './lib/audio';
 import SettingsPanel from './components/SettingsPanel';
 import Waveform from './components/Waveform';
-import InstallPrompt from './components/InstallPrompt';
 import PhysioSchedule from './components/PhysioSchedule';
 import AnalyticsPanel from './components/AnalyticsPanel';
 import { motion, AnimatePresence } from 'motion/react';
@@ -15,6 +14,7 @@ const DEFAULTS: WorkoutSettings = {
   targetCycles: 0, // 0 = unlimited
   sound: 'beep',
   soundTheme: 'digital',
+  continuousSound: 'drum-loop',
   volume: 60,
   vibrate: false,
   wakelock: true,
@@ -132,7 +132,8 @@ export default function App() {
   useEffect(() => {
     audio.setVolume(settings.volume);
     audio.setTheme(settings.soundTheme || 'digital');
-  }, [settings.volume, settings.soundTheme]);
+    audio.setContinuousSound(settings.continuousSound || 'drum-loop');
+  }, [settings.volume, settings.soundTheme, settings.continuousSound]);
 
   // --------- Wake Lock managers ---------
   const requestWakeLockState = async () => {
@@ -237,7 +238,8 @@ export default function App() {
 
       // Acoustic live ticks checker
       const remainingCeil = Math.ceil(remaining);
-      if (settings.sound === 'countdown') {
+      if (settings.sound === 'countdown' || settings.sound === 'continuous') {
+        // Last-3s warning beeps in BOTH active and rest phases
         if (remainingCeil <= 3 && remainingCeil > 0 && remainingCeil !== lastCountdownTickRef.current) {
           lastCountdownTickRef.current = remainingCeil;
           audio.playThemedTick();
@@ -621,8 +623,6 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* PWA Direct Installation module */}
-                <InstallPrompt />
               </motion.div>
             )}
 
@@ -682,10 +682,6 @@ export default function App() {
 
         {/* Footer/Aesthetic row (Humble, clean, avoiding slop terminal text) */}
         <footer className="pt-3 border-t border-natural-border flex justify-between text-[11px] text-[#757570] font-sans">
-          <div className="flex items-center gap-1">
-            <Trophy className="w-3.5 h-3.5 text-natural-moss/70" />
-            <span>EMS Pulse Sync Active</span>
-          </div>
           <div className="flex items-center gap-1 font-mono">
             <Heart className="w-3.5 h-3.5 text-natural-terracotta/75" />
             <span>Healthy Exercise Timer</span>

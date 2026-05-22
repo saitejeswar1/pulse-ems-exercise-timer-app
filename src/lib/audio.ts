@@ -1,8 +1,9 @@
-import { SoundMode, SoundTheme } from '../types';
+import { SoundMode, SoundTheme, ContinuousSound } from '../types';
 
 class AudioEngine {
   private ctx: AudioContext | null = null;
   private theme: SoundTheme = 'digital';
+  private continuousSound: ContinuousSound = 'drum-loop';
   private volume: number = 60; // default 60%
 
   // Continuous sound active nodes
@@ -13,6 +14,7 @@ class AudioEngine {
   private continuousLfoGain: GainNode | null = null;
   private continuousFilter: BiquadFilterNode | null = null;
   private continuousGain: GainNode | null = null;
+  private continuousIntervalId: any = null;
 
   // Synth sequencer beat variables
   private synthIntervalId: any = null;
@@ -54,6 +56,15 @@ class AudioEngine {
 
   public setTheme(theme: SoundTheme) {
     this.theme = theme;
+  }
+
+  public setContinuousSound(sound: ContinuousSound) {
+    const wasRunning = this.continuousGain !== null;
+    this.continuousSound = sound;
+    if (wasRunning) {
+      this.stopContinuousTone();
+      this.startContinuousTone();
+    }
   }
 
   private getMasterGainMultiplier(): number {
@@ -248,11 +259,130 @@ class AudioEngine {
     try {
       const now = context.currentTime;
       const masterGain = context.createGain();
-      
-      // We will hook our specific generators to this master gain node
       this.continuousGain = masterGain;
+      masterGain.connect(context.destination);
 
-      if (this.theme === 'digital') {
+      const vol = this.getMasterGainMultiplier();
+
+      if (this.continuousSound === 'drum-loop') {
+        // HIIT-style 120 bpm drum loop: four-on-the-floor kick + offbeat hi-hats.
+        masterGain.gain.setValueAtTime(0.9 * vol, now);
+        let step = 0;
+        const stepMs = 250; // 120 BPM eighth-notes (8 steps per bar)
+        const fire = () => {
+          if (!this.ctx || !this.continuousGain) return;
+          const t = this.ctx.currentTime + 0.02;
+          // Kick on beats 0,4
+          if (step === 0 || step === 4) {
+            const o = this.ctx.createOscillator();
+            const g = this.ctx.createGain();
+            o.frequency.setValueAtTime(150, t);
+            o.frequency.exponentialRampToValueAtTime(40, t + 0.18);
+            g.gain.setValueAtTime(0.6, t);
+            g.gain.exponentialRampToValueAtTime(0.0001, t + 0.2);
+            o.connect(g); g.connect(masterGain);
+            o.start(t); o.stop(t + 0.22);
+          }
+          // Hi-hat on offbeats 2,6
+          if (step === 2 || step === 6) {
+            const bufSize = this.ctx.sampleRate * 0.05;
+            const buf = this.ctx.createBuffer(1, bufSize, this.ctx.sampleRate);
+            const d = buf.getChannelData(0);
+            for (let i = 0; i < bufSize; i++) d[i] = Math.random() * 2 - 1;
+            const src = this.ctx.createBufferSource();
+            src.buffer = buf;
+            const hp = this.ctx.createBiquadFilter();
+            hp.type = 'highpass';
+            hp.frequency.setValueAtTime(7000, t);
+            const g = this.ctx.createGain();
+            g.gain.setValueAtTime(0.25, t);
+            g.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+            src.connect(hp); hp.connect(g); g.connect(masterGain);
+            src.start(t); src.stop(t + 0.06);
+          }
+          // Snare-ish clap on 4
+          if (step === 4) {
+            const bufSize = this.ctx.sampleRate * 0.1;
+            const buf = this.ctx.createBuffer(1, bufSize, this.ctx.sampleRate);
+            const d = buf.getChannelData(0);
+            for (let i = 0; i < bufSize; i++) d[i] = Math.random() * 2 - 1;
+            const src = this.ctx.createBufferSource();
+            src.buffer = buf;
+            const bp = this.ctx.createBiquadFilter();
+            bp.type = 'bandpass';
+            bp.frequency.setValueAtTime(1800, t);
+            const g = this.ctx.createGain();
+            g.gain.setValueAtTime(0.35, t);
+            g.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
+            src.connect(bp); bp.connect(g); g.connect(masterGain);
+            src.start(t); src.stop(t + 0.13);
+          }
+          step = (step + 1) % 8;
+        };
+        fire();
+        this.continuousIntervalId = setInterval(fire, stepMs);
+
+      } else if (this.continuousSound === 'ambient-pad') {
+        // Warm sustained pad: A2 + E3 + A3 sine chord, slow filter LFO breathing.
+        const o1 = context.createOscillator();
+        const o2 = context.createOscillator();
+        const o3 = context.createOscillator();
+        const filter = context.createBiquadFilter();
+        const lfo = context.createOscillator();
+        const lfoGain = context.createGain();
+
+        o1.type = 'sine'; o1.frequency.setValueAtTime(110, now);
+        o2.type = 'sine'; o2.frequency.setValueAtTime(164.81, now); // E3
+        o3.type = 'triangle'; o3.frequency.setValueAtTime(220, now);
+
+        filter.type = 'lowpass';
+        filter.frequency.setValueAtTime(700, now);
+
+        lfo.type = 'sine';
+        lfo.frequency.setValueAtTime(0.2, now); // 5s breathing cycle
+        lfoGain.gain.setValueAtTime(250, now); // sweep cutoff ±250Hz
+
+        masterGain.gain.setValueAtTime(0, now);
+        masterGain.gain.linearRampToValueAtTime(0.5 * vol, now + 0.3);
+
+        o1.connect(filter); o2.connect(filter); o3.connect(filter);
+        filter.connect(masterGain);
+        lfo.connect(lfoGain); lfoGain.connect(filter.frequency);
+
+        o1.start(); o2.start(); o3.start(); lfo.start();
+        this.continuousOsc1 = o1;
+        this.continuousOsc2 = o2;
+        this.continuousOsc3 = o3;
+        this.continuousLfo = lfo;
+        this.continuousLfoGain = lfoGain;
+        this.continuousFilter = filter;
+
+      } else if (this.continuousSound === 'heartbeat') {
+        // Lub-dub thumps at 60 bpm. Loud sine bass thumps audible on phone speakers.
+        masterGain.gain.setValueAtTime(1.0 * vol, now);
+        const thump = (when: number, strength: number, startHz: number) => {
+          if (!this.ctx || !this.continuousGain) return;
+          const o = this.ctx.createOscillator();
+          const g = this.ctx.createGain();
+          o.type = 'sine';
+          o.frequency.setValueAtTime(startHz, when);
+          o.frequency.exponentialRampToValueAtTime(28, when + 0.22);
+          g.gain.setValueAtTime(0, when);
+          g.gain.linearRampToValueAtTime(strength, when + 0.012);
+          g.gain.exponentialRampToValueAtTime(0.0001, when + 0.28);
+          o.connect(g); g.connect(masterGain);
+          o.start(when); o.stop(when + 0.3);
+        };
+        const fire = () => {
+          if (!this.ctx) return;
+          const t = this.ctx.currentTime + 0.02;
+          thump(t, 0.9, 75);          // lub
+          thump(t + 0.22, 0.65, 65);  // dub
+        };
+        fire();
+        this.continuousIntervalId = setInterval(fire, 1000); // 60 bpm
+
+      } else if (this.theme === 'digital') {
         // Crisp warm hum: 330Hz triangle wave + 660Hz sine octave harmonic
         const osc1 = context.createOscillator();
         const osc2 = context.createOscillator();
@@ -409,6 +539,11 @@ class AudioEngine {
 
   public stopContinuousTone() {
     this.stopSynthBeat();
+
+    if (this.continuousIntervalId) {
+      clearInterval(this.continuousIntervalId);
+      this.continuousIntervalId = null;
+    }
 
     if (!this.ctx) return;
     const now = this.ctx.currentTime;
