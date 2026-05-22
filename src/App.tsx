@@ -14,6 +14,7 @@ const DEFAULTS: WorkoutSettings = {
   restDur: 15,
   targetCycles: 0, // 0 = unlimited
   sound: 'beep',
+  soundTheme: 'digital',
   volume: 60,
   vibrate: false,
   wakelock: true,
@@ -127,10 +128,11 @@ export default function App() {
     } catch (e) {}
   }, [logs]);
 
-  // --------- Volume update ---------
+  // --------- Volume and Theme update ---------
   useEffect(() => {
     audio.setVolume(settings.volume);
-  }, [settings.volume]);
+    audio.setTheme(settings.soundTheme || 'digital');
+  }, [settings.volume, settings.soundTheme]);
 
   // --------- Wake Lock managers ---------
   const requestWakeLockState = async () => {
@@ -238,14 +240,14 @@ export default function App() {
       if (settings.sound === 'countdown') {
         if (remainingCeil <= 3 && remainingCeil > 0 && remainingCeil !== lastCountdownTickRef.current) {
           lastCountdownTickRef.current = remainingCeil;
-          audio.beep(660, 0.08, 'sine');
+          audio.playThemedTick();
         }
       } else if (settings.sound === 'metronome') {
         if (phase === 'active') {
           const wholeSec = Math.floor(elapsed);
           if (wholeSec !== metronomeLastSecRef.current && wholeSec > 0) {
             metronomeLastSecRef.current = wholeSec;
-            audio.beep(1000, 0.04, 'square');
+            audio.playThemedTick();
           }
         }
       }

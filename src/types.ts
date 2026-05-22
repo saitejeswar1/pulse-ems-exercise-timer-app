@@ -1,10 +1,12 @@
 export type SoundMode = 'off' | 'beep' | 'countdown' | 'metronome' | 'continuous';
+export type SoundTheme = 'digital' | 'ems' | 'synth' | 'zen' | 'arcade';
 
 export interface WorkoutSettings {
   activeDur: number; // 5 - 120
   restDur: number;   // 5 - 120
   targetCycles: number; // 0 = unlimited, or physical limit
   sound: SoundMode;
+  soundTheme: SoundTheme;
   volume: number;    // 0 - 100
   vibrate: boolean;
   wakelock: boolean;
