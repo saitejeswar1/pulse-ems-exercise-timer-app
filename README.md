@@ -1,77 +1,122 @@
-# Pulse • EMS Exercise Timer
+# Pulse — Exercise Timer
 
-Pulse is a premium, high-performance physiotherapy and training timer designed specifically for **EMS (Electrical Muscle Stimulation)** and interval-based rehabilitation. It guides you through precise active stimulation (contraction) and rest (relaxation) cycles, ensuring you maximize every training session with perfect rhythm and form.
+Pulse is a clean, offline-first **exercise timer and program tracker** for Android. It started as a precision EMS (Electrical Muscle Stimulation) interval timer and has grown into a general-purpose tool that handles **EMS, strength, cardio, mobility, and hold-based** exercises with equal care.
 
-Whether you are recovering from an injury, working with a therapist, or performing personal EMS workouts, Pulse keeps your timing exact and your progress tracked.
+Whether you're running a physiotherapy routine, timing a circuit, holding a plank for as long as you can, or just trying to do four sets of push-ups without staring at your phone clock — Pulse keeps the rhythm so you don't have to.
 
----
-
-## ⚡ What is EMS Training?
-
-Electrical Muscle Stimulation (EMS) sends small electrical impulses to your muscles to recruit deep muscle fibers and increase the intensity of contraction. Because EMS relies on distinct work and recovery phases, timing is critical:
-* **Active Phase (Contraction):** The device delivers the impulse. You contract your muscles and perform the physical exercise.
-* **Rest Phase (Relaxation):** The impulse pauses. You relax, catch your breath, and prepare for the next contraction.
+<p align="center">
+  <img src="screenshots/home.png" alt="Pulse home screen" width="260" />
+  <img src="screenshots/home_routine_loaded.png" alt="Routine loaded on home" width="260" />
+</p>
 
 ---
 
 ## ✨ Features
 
-Pulse is packed with features to keep your workouts seamless and structured:
+### Three exercise modes
+Every exercise can be configured as one of:
 
-### 📅 Custom Physiotherapy Scheduler
-* **Day-Wise Scheduling:** Map your exercises to specific days of the week (e.g., Mon, Wed, Fri) to stay on track.
-* **Fully Customizable Routines:** Set individual Active durations, Rest durations, and Target Cycles for every single exercise.
-* **Weekly Goals:** Set and track weekly targets for each muscle group or movement.
-* **Therapist Notes:** Save custom notes and tips (e.g., "Keep core engaged" or "Set EMS level to 4") directly under each exercise.
+* **Time** — Fixed active duration. Pulse counts down the work phase, then auto-switches to rest.
+* **Reps** — No active countdown. Do your reps and tap **Done Set** when finished; rest begins automatically.
+* **Hold** — A stopwatch counts *up* from `00:00`. Tap **Stop Hold** when you can't hold any longer. Built for planks, wall-sits, and other "as long as possible" work.
 
-### 🌊 Dynamic Waveform Visualization
-* An interactive, high-fidelity real-time waveform mimics the EMS impulse signal.
-* Visually prepares you for the transition between contraction (Active) and relaxation (Rest) cycles with smooth, engaging animation.
+### Custom program builder
+* Add, **edit**, **reorder**, and remove exercises.
+* Per-exercise: name, category, mode, active/rest duration, sets, reps-per-set, scheduled weekdays, weekly target, and free-form notes.
+* Filter the program list by **category** (EMS / Strength / Cardio / Mobility / Other) or by **day of the week**.
 
-### 🔊 Advanced Sound & Cue Systems
-* **Beep Cues:** Simple audio indicators as phases change.
-* **Countdown Guides:** Voice/sound countdowns to prepare you for the exact millisecond of the next contraction.
-* **Metronome Rhythms:** Steady ticks to help you time repetitions (e.g., slow squats or bicep curls) perfectly during the active phase.
-* **Vibration Alerts:** Tactile vibration cues so you can feel phase changes even when you can't hear them or look at your screen.
+<p align="center">
+  <img src="screenshots/program.png" alt="Program tab" width="280" />
+</p>
 
-### 📊 Intelligent Training Analytics
-* Automatically logs every completed session.
-* Displays calendar logs with precise dates and times.
-* Computes key metrics including:
-  * **Cycles Completed:** Total active reps/sets executed.
-  * **Time Under Tension:** Total accumulated active stimulation time.
-  * **Consistency Rates:** Monthly and weekly frequency trends.
+### Today's auto-loaded superset
+* On the home screen, Pulse looks at today's weekday and lists every exercise you've scheduled for it.
+* Tap **Load Today's Program** to queue them all in order — Pulse runs them back-to-back, inserts a configurable **between-exercises rest**, and shows an "Up Next" preview during each transition.
+* Manual mode still works: pick a single exercise from the Program tab and just that one loads.
 
-### 📱 Premium Native Experience
-* **Wake Lock:** Keeps your device screen illuminated during your entire workout so the timer never sleeps.
-* **Clean, Dark-Mode Theme:** Premium HSL color palette designed for high visibility in low-light gym environments or physical therapy clinics.
+### Import / Export plans
+* Export your full program as **JSON** or **CSV** with a single tap.
+* Import a plan from JSON or CSV — append to your existing list or replace it.
+* Downloadable **templates** for both formats so you can build a plan in a spreadsheet or text editor and bring it in cleanly.
+
+### Dynamic waveform & rich audio cues
+* Real-time animated waveform indicating the current phase (active / rest / transition).
+* Five sound themes (Digital, EMS, Synth, Zen, Arcade) and five sound modes (off, beep, countdown, metronome, continuous).
+* Adjustable volume, vibration feedback for phase changes, and a screen wake-lock so the timer never sleeps.
+
+<p align="center">
+  <img src="screenshots/acoustic_settings.png" alt="Acoustic & timing settings" width="280" />
+</p>
+
+### Intelligent progress dashboard
+Each completed exercise writes a local log entry. The dashboard surfaces it as:
+
+* **Today's status card** — rest day, partially complete, or all done.
+* **Streak counter** — consecutive days with at least one workout.
+* **Sessions & active time** — lifetime totals and total time under tension.
+* **Weekly & monthly goals** — targets derived automatically from your program, with a week-over-week delta chip.
+* **12-week activity heatmap** — GitHub-style consistency view.
+* **Top exercises** — your most frequent and longest-time-under-tension movements.
+* **Hold personal bests** — your longest single hold per exercise.
+* **Full history log** — searchable, with per-entry mode, sets, and best-hold information.
+
+<p align="center">
+  <img src="screenshots/progress_dashboard.png" alt="Progress dashboard" width="280" />
+</p>
+
+### Native Android polish
+* **Hardware back button** routes through the tab hierarchy — back from any section returns to the timer; back from the timer exits.
+* **Screen wake-lock** keeps the display on for the duration of an active workout.
+* **Clean, dark-mode-friendly palette** designed for low-light gym and clinic use.
+* Fully **offline** — all data is stored locally on your device. No accounts, no servers, no tracking.
 
 ---
 
-## 📖 How to Use the App
+## 📖 How to use Pulse
 
-### 1. Configure Your Workout Settings
-Before you start, tap the **Settings** icon to customize your global defaults:
-* Set your preferred **Active/Rest** default durations.
-* Select your **Sound Mode** (Beep, Countdown, Metronome, or Continuous).
-* Toggle **Screen Wake Lock** and **Vibration** settings.
+### 1. Build your program
+Head to the **Program** tab and add the exercises you want to track:
 
-### 2. Create and Select an Exercise
-Navigate to the **Physiotherapy Program** panel:
-* Tap **Add Exercise** to create a custom movement.
-* Select an exercise from your weekly schedule list. The timer will automatically load its custom Active, Rest, and Cycle settings.
+* Pick a **category** (EMS, Strength, Cardio, Mobility, Other).
+* Pick a **mode** (Time / Reps / Hold) — the form fields adapt to the choice.
+* Set duration, sets, reps-per-set, and the **weekdays** you plan to do it.
+* Optionally add notes (form cues, therapist instructions, intensity reminders).
 
-### 3. Run Your Workout
-* Tap **Start** to begin. The screen will shift into active visualization.
-* **Active (Orange Waveform):** Contract and move!
-* **Rest (Blue Waveform):** Relax and breathe.
-* Tap **Pause** at any time to adjust your EMS equipment or check your posture.
+You can reorder exercises with the chevron buttons, edit any of them with the pencil icon, or import a full plan via the upload button.
 
-### 4. Review Your Progress
-Once your cycles are complete, tap the **Analytics** icon to review your session metrics, keep track of your weekly totals, and watch your muscle endurance improve over time.
+### 2. Run today's program
+Open the **Timer** tab. If you've scheduled exercises for today, you'll see them queued up automatically — tap **Load Today's Program** to start running the whole superset, or pick a single exercise manually from the Program tab.
+
+* **Active phase** — moss-green waveform. Contract, move, or hold.
+* **Rest phase** — terracotta waveform. Breathe.
+* **Transition** — orange pulse with "Up Next" preview. Tap **Skip Rest** to jump to the next exercise immediately.
+* **Done Set / Stop Hold** — for rep- and hold-mode exercises, the bottom button ends the active phase on your terms.
+
+### 3. Review your progress
+The **Progress** tab shows everything: today's completion status, your streak, weekly/monthly goals, a 12-week heatmap, your top exercises, and your personal best holds.
 
 ---
 
-## 🔒 Privacy & Safety First
-* **Offline Local Storage:** All of your physiotherapy schedules and workout history are stored privately on your device. Absolutely no data is uploaded to third-party servers.
-* **Safety First:** Always start EMS workouts at low intensity levels and adjust intervals according to your physical therapist's recommendations.
+## ⚡ A note on EMS
+
+Pulse keeps full first-class support for **Electrical Muscle Stimulation** routines — including a dedicated EMS sound theme, EMS category, and the original biphasic-waveform visualization. EMS-specific safety still applies:
+
+* Always start at low intensity and follow your physical therapist's guidance.
+* Keep stimulation sessions within recommended duration windows.
+* Avoid placing electrodes near the heart, on broken skin, or over the carotid sinus.
+
+EMS is one of several use cases Pulse supports today — not the only one.
+
+---
+
+## 🔒 Privacy
+
+* **Everything is local.** Your program, settings, and workout history live in your device's `localStorage`. Nothing is uploaded.
+* **No accounts.** No login, no email, no telemetry.
+* **Export anytime.** Your data isn't locked in — pull it out as JSON or CSV whenever you want.
+
+---
+
+## 🛠 For developers
+
+Pulse is built with React 19 + TypeScript + Vite + Tailwind, wrapped in Capacitor 8 for Android. The complete development workflow — local dev, asset generation, signed-release builds — lives in [`DEVELOPER.md`](./DEVELOPER.md).
