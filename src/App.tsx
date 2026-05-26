@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Play, Pause, RotateCcw, Clock, Dumbbell, TrendingUp, Settings as SettingsIcon, Check, Heart, PlusCircle, CheckCircle2, CalendarCheck, SkipForward, X, Hourglass, Square } from 'lucide-react';
+import { Play, Pause, RotateCcw, Clock, Dumbbell, TrendingUp, Settings as SettingsIcon, Check, PlusCircle, CheckCircle2, CalendarCheck, SkipForward, X, Hourglass, Square } from 'lucide-react';
 import { WorkoutSettings, WorkoutPhase, PhysioExercise, WorkoutLogEntry, ExerciseMode } from './types';
 import { audio } from './lib/audio';
 import { App as CapacitorApp } from '@capacitor/app';
@@ -599,6 +599,50 @@ export default function App() {
   const todayShort = WEEKDAY_SHORT[new Date().getDay()];
   const todaysExercises = exercises.filter(e => e.weekdays?.includes(todayShort));
 
+  // Footer status line — contextual to the current phase
+  const footerStatus = (() => {
+    const fmtMS = (s: number) => {
+      const m = Math.floor(s / 60);
+      const r = s % 60;
+      return m > 0 ? `${m}m ${r}s` : `${r}s`;
+    };
+    const targetCyc = currentExercise?.targetCycles ?? settings.targetCycles;
+
+    if (phase === 'active') {
+      const setLabel = targetCyc > 0 ? `Set ${cycles + 1} of ${targetCyc}` : `Set ${cycles + 1}`;
+      if (currentMode === 'reps') return `${setLabel} · tap when done`;
+      if (currentMode === 'hold') return `${setLabel} · holding ${fmtMS(remainingSec)}`;
+      return `${setLabel} · ${remainingSec}s remaining`;
+    }
+
+    if (phase === 'rest') {
+      const nextEx = exercises.find(e => e.id === queue[queueIndex + 1]);
+      const tail = targetCyc > 0 && cycles >= targetCyc && nextEx
+        ? ` · next: ${nextEx.name}`
+        : '';
+      return `Rest · ${remainingSec}s${tail}`;
+    }
+
+    if (phase === 'transition') {
+      const nextEx = exercises.find(e => e.id === queue[queueIndex + 1]);
+      return `Up next · ${nextEx?.name ?? '—'} in ${remainingSec}s`;
+    }
+
+    if (phase === 'done') {
+      const last = logs[logs.length - 1];
+      if (last) return `Session logged · ${fmtMS(last.totalActiveSeconds)} under tension`;
+      return 'Session complete';
+    }
+
+    // idle
+    const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
+    const doneToday = logs.filter(l => l.timestamp >= startOfDay.getTime()).length;
+    const planned = todaysExercises.length;
+    if (planned > 0) return `v1.2 · offline · ${doneToday} of ${planned} done today`;
+    if (doneToday > 0) return `v1.2 · offline · ${doneToday} session${doneToday === 1 ? '' : 's'} today`;
+    return 'v1.2 · offline · no accounts';
+  })();
+
   const handleStartTodaysProgram = () => {
     if (todaysExercises.length === 0) return;
     const ids = todaysExercises.map(e => e.id);
@@ -1066,12 +1110,20 @@ export default function App() {
           </AnimatePresence>
         </main>
 
-        {/* Footer/Aesthetic row (Humble, clean, avoiding slop terminal text) */}
-        <footer className="pt-3 border-t border-natural-border flex justify-between text-[11px] text-[#757570] font-sans">
-          <div className="flex items-center gap-1 font-mono">
-            <Heart className="w-3.5 h-3.5 text-natural-terracotta/75" />
-            <span>Healthy Exercise Timer</span>
-          </div>
+        {/* Footer — contextual status line that reflects the current workout phase */}
+        <footer className="pt-3 border-t border-natural-border flex items-center gap-2 text-[11px] text-[#757570] font-mono">
+          <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+            phase === 'active'
+              ? 'bg-natural-moss shadow-[0_0_6px_#5A5A40]'
+              : phase === 'rest'
+              ? 'bg-natural-terracotta shadow-[0_0_6px_#D98C72]'
+              : phase === 'transition'
+              ? 'bg-natural-terracotta animate-pulse'
+              : phase === 'done'
+              ? 'bg-natural-moss'
+              : 'bg-natural-terracotta/60'
+          }`} />
+          <span className="truncate">{footerStatus}</span>
         </footer>
 
       </div>
