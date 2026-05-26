@@ -107,11 +107,11 @@ export default function SettingsPanel({ settings, onChange, onClose }: SettingsP
               {settings.activeDur}s
             </span>
           </div>
-          <input 
-            type="range" 
-            min="5" 
-            max="120" 
-            step="1" 
+          <input
+            type="range"
+            min="0"
+            max="120"
+            step="1"
             value={settings.activeDur}
             onChange={(e) => handleTimingChange('activeDur', parseInt(e.target.value))}
             className="w-full h-1.5 bg-natural-bg rounded-lg appearance-none cursor-pointer accent-natural-moss focus:outline-none"
@@ -156,6 +156,28 @@ export default function SettingsPanel({ settings, onChange, onClose }: SettingsP
           />
           <p className="text-[11px] text-[#70706B] leading-relaxed">
             0 means unlimited sets. Setting a target stops and sings a workout complete fanfare.
+          </p>
+        </div>
+
+        {/* Inter-exercise rest */}
+        <div className="flex flex-col gap-2">
+          <div className="flex justify-between items-center text-sm">
+            <span className="text-natural-dark font-medium">Between Exercises Rest</span>
+            <span className="px-2.5 py-0.5 text-xs font-semibold font-mono text-natural-terracotta bg-natural-terracotta/10 rounded-full border border-natural-terracotta/20">
+              {settings.interExerciseRest}s
+            </span>
+          </div>
+          <input
+            type="range"
+            min="0"
+            max="180"
+            step="5"
+            value={settings.interExerciseRest}
+            onChange={(e) => handleTimingChange('interExerciseRest', parseInt(e.target.value))}
+            className="w-full h-1.5 bg-natural-bg rounded-lg appearance-none cursor-pointer accent-natural-terracotta focus:outline-none"
+          />
+          <p className="text-[11px] text-[#70706B] leading-relaxed">
+            Used when running today's program as a superset — pause between consecutive exercises.
           </p>
         </div>
       </div>
