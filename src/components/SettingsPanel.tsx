@@ -1,16 +1,18 @@
 import { WorkoutSettings, SoundMode, ContinuousSound } from '../types';
 import { audio } from '../lib/audio';
-import { 
-  Volume2, 
-  Clock, 
-  Repeat, 
-  VolumeX, 
-  Music, 
-  Zap, 
-  BellRing, 
-  Activity, 
-  Eye, 
+import { clearAIArtifacts } from '../lib/aiInsights';
+import {
+  Volume2,
+  Clock,
+  Repeat,
+  VolumeX,
+  Music,
+  Zap,
+  BellRing,
+  Activity,
+  Eye,
   Smartphone,
+  Sparkles,
 } from 'lucide-react';
 import { motion } from 'motion/react';
 
@@ -322,6 +324,45 @@ export default function SettingsPanel({ settings, onChange, onClose }: SettingsP
             }`} />
           </button>
         </div>
+      </div>
+
+      {/* 4. AI Coach (opt-in) */}
+      <div className="p-5 bg-white rounded-2xl border border-natural-border flex flex-col gap-4 shadow-sm">
+        <h3 className="text-xs font-bold text-natural-moss tracking-wider uppercase flex items-center gap-2">
+          <Sparkles className="w-4 h-4 text-natural-moss" />
+          AI Coach
+          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-natural-terracotta/10 text-natural-terracotta tracking-wide">
+            BETA
+          </span>
+        </h3>
+
+        <div className="flex justify-between items-start gap-3 p-3.5 bg-natural-bg rounded-xl border border-natural-border">
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-semibold text-natural-dark">Generate weekly insights</div>
+            <div className="text-[11px] text-[#70706B] mt-0.5 leading-relaxed">
+              When on, sends an anonymized weekly summary — your exercise names, session counts, durations, and adherence — to surface short coach-style notes on the Progress tab. No timestamps, no notes, no IDs. Off by default.
+            </div>
+          </div>
+          <button
+            id="ai-insights-toggle"
+            onClick={() => {
+              const next = !settings.aiInsightsEnabled;
+              if (!next) clearAIArtifacts();
+              handleTimingChange('aiInsightsEnabled', next);
+            }}
+            className={`w-12 h-6 rounded-full relative transition-colors duration-200 focus:outline-none flex-shrink-0 ${
+              settings.aiInsightsEnabled ? 'bg-natural-moss' : 'bg-[#E5E5E0]'
+            }`}
+          >
+            <div className={`w-5 h-5 rounded-full bg-white absolute top-0.5 left-0.5 transition-transform duration-200 shadow-sm ${
+              settings.aiInsightsEnabled ? 'translate-x-6' : 'translate-x-0'
+            }`} />
+          </button>
+        </div>
+
+        <p className="text-[10px] text-[#8B8B80] italic leading-relaxed">
+          Currently running on a local stub — no network calls yet. A free-tier backend will be wired in a later release. Disabling clears any cached insights from this device.
+        </p>
       </div>
 
     </div>

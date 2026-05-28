@@ -20,6 +20,7 @@ const DEFAULTS: WorkoutSettings = {
   volume: 60,
   vibrate: false,
   wakelock: true,
+  aiInsightsEnabled: false,
 };
 
 const WEEKDAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -1086,6 +1087,7 @@ export default function App() {
                 <AnalyticsPanel
                   logs={logs}
                   exercises={exercises}
+                  aiEnabled={settings.aiInsightsEnabled ?? false}
                   onClearLogs={() => setLogs([])}
                 />
               </motion.div>

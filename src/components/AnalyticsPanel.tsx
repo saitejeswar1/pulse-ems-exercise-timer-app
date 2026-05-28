@@ -1,16 +1,45 @@
+import { useState, useEffect } from 'react';
 import { WorkoutLogEntry, PhysioExercise } from '../types';
 import {
-  Award, Calendar, Clock, TrendingUp, CheckCircle, Trash2, CalendarDays,
-  CheckCircle2, Flame, Hourglass, Trophy, ListChecks, Coffee,
+  Award, Calendar, Clock, TrendingUp, CheckCircle, Trash2,
+  CheckCircle2, Flame, Hourglass, Trophy, ListChecks, Coffee, Target,
+  SlidersHorizontal, Download, Sparkles, X,
 } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import ExerciseDetailSheet from './ExerciseDetailSheet';
+import { exportLogsJSON, exportLogsCSV } from '../lib/logIO';
+import { downloadFile } from '../lib/planIO';
+import {
+  buildStatsBlob, generateInsights, loadCachedInsights, saveCachedInsights,
+  isDismissedToday, dismissForToday, Insight,
+} from '../lib/aiInsights';
+
+type FilterRange = 'all' | '7d' | '30d' | '90d';
+const CATEGORY_FILTER_OPTIONS: { value: string; label: string }[] = [
+  { value: 'all',      label: 'All' },
+  { value: 'ems',      label: 'EMS' },
+  { value: 'strength', label: 'Strength' },
+  { value: 'cardio',   label: 'Cardio' },
+  { value: 'mobility', label: 'Mobility' },
+  { value: 'other',    label: 'Other' },
+];
 
 interface AnalyticsPanelProps {
   logs: WorkoutLogEntry[];
   exercises: PhysioExercise[];
+  aiEnabled?: boolean;
   onClearLogs: () => void;
 }
 
 const WEEKDAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+const CATEGORY_BAR_COLORS: Record<string, { fill: string; dot: string; label: string }> = {
+  ems:      { fill: 'bg-natural-terracotta', dot: 'bg-natural-terracotta', label: 'EMS' },
+  strength: { fill: 'bg-natural-moss',       dot: 'bg-natural-moss',       label: 'Strength' },
+  cardio:   { fill: 'bg-rose-500',           dot: 'bg-rose-500',           label: 'Cardio' },
+  mobility: { fill: 'bg-sky-500',            dot: 'bg-sky-500',            label: 'Mobility' },
+  other:    { fill: 'bg-slate-400',          dot: 'bg-slate-400',          label: 'Other' },
+};
 
 const dayKey = (d: Date | number) => {
   const dt = typeof d === 'number' ? new Date(d) : d;
@@ -29,7 +58,57 @@ const formatHold = (s: number) => {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 };
 
-export default function AnalyticsPanel({ logs, exercises, onClearLogs }: AnalyticsPanelProps) {
+export default function AnalyticsPanel({ logs, exercises, aiEnabled, onClearLogs }: AnalyticsPanelProps) {
+  const [detailExerciseName, setDetailExerciseName] = useState<string | null>(null);
+  const openDetail = (name: string) => setDetailExerciseName(name);
+
+  // History-log filter / export panel
+  const [showFilters, setShowFilters] = useState(false);
+  const [filterRange, setFilterRange] = useState<FilterRange>('all');
+  const [filterCategory, setFilterCategory] = useState<string>('all');
+  const [filterExercise, setFilterExercise] = useState<string>('all');
+
+  // AI Coach card state
+  const [aiInsights, setAiInsights] = useState<Insight[] | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiDismissed, setAiDismissed] = useState<boolean>(() => isDismissedToday());
+
+  // Show the card only when opted in, with at least 3 sessions to draw signal from,
+  // and not dismissed for today.
+  const minSessionsForAI = 3;
+  const aiEligible = (aiEnabled ?? false) && logs.length >= minSessionsForAI && !aiDismissed;
+
+  useEffect(() => {
+    if (!aiEligible) {
+      setAiInsights(null);
+      return;
+    }
+    let cancelled = false;
+    const stats = buildStatsBlob(logs, exercises);
+    const cached = loadCachedInsights(stats);
+    if (cached) {
+      setAiInsights(cached);
+      return;
+    }
+    setAiLoading(true);
+    generateInsights(stats)
+      .then(insights => {
+        if (cancelled) return;
+        setAiInsights(insights);
+        if (insights.length > 0) saveCachedInsights(stats, insights);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setAiLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [aiEligible, logs, exercises]);
+
+  const handleAiDismiss = () => {
+    dismissForToday();
+    setAiDismissed(true);
+  };
+
   const now = new Date();
   const todayShort = WEEKDAY_SHORT[now.getDay()];
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
@@ -80,16 +159,49 @@ export default function AnalyticsPanel({ logs, exercises, onClearLogs }: Analyti
   const lastWeekCount = logs.filter(l => l.timestamp >= twoWeeksAgo && l.timestamp < weekAgo).length;
   const weekDelta = thisWeekCount - lastWeekCount;
 
-  // --- Weekly + monthly goals (real targets from program) ---
-  const sumWeeklyTargets = exercises.reduce((sum, e) => sum + (e.weeklyTarget ?? 0), 0);
-  const targetWeeklyWorkouts = sumWeeklyTargets > 0 ? sumWeeklyTargets : 4;
-  const targetMonthlyWorkouts = targetWeeklyWorkouts * 4;
-
   // Sessions in the last 7 / 30 days
   const sessionsLast7 = thisWeekCount;
-  const sessionsLast30 = logs.filter(l => l.timestamp >= startOfToday - 30 * 86400000).length;
-  const weeklyCompliancePercent = Math.min(100, Math.round((sessionsLast7 / targetWeeklyWorkouts) * 100));
-  const monthlyCompliancePercent = Math.min(100, Math.round((sessionsLast30 / targetMonthlyWorkouts) * 100));
+  const last30Logs = logs.filter(l => l.timestamp >= startOfToday - 30 * 86400000);
+  const sessionsLast30 = last30Logs.length;
+  const secondsLast30 = last30Logs.reduce((a, l) => a + l.totalActiveSeconds, 0);
+
+  // --- Plan Adherence: of the sessions scheduled in the last 7 days, how many were done? ---
+  let scheduledSessions7 = 0;
+  let completedSessions7 = 0;
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(startOfToday - i * 86400000);
+    const dayShort = WEEKDAY_SHORT[d.getDay()];
+    const dayStart = d.getTime();
+    const dayEnd = dayStart + 86400000;
+    const scheduled = exercises.filter(e => e.weekdays?.includes(dayShort));
+    scheduledSessions7 += scheduled.length;
+    const dayLogs = logs.filter(l => l.timestamp >= dayStart && l.timestamp < dayEnd);
+    const completedOnDay = scheduled.filter(ex =>
+      dayLogs.some(l => l.exerciseId === ex.id || l.exerciseName === ex.name)
+    ).length;
+    completedSessions7 += completedOnDay;
+  }
+  const hasSchedule = scheduledSessions7 > 0;
+  const adherencePercent = hasSchedule
+    ? Math.round((completedSessions7 / scheduledSessions7) * 100)
+    : 0;
+  const extraSessions7 = Math.max(0, sessionsLast7 - completedSessions7);
+
+  // --- Category mix (last 7 days, by active seconds) ---
+  const last7Logs = logs.filter(l => l.timestamp >= weekAgo);
+  const categoryTotalsMap = new Map<string, number>();
+  last7Logs.forEach(l => {
+    const cat = l.category ?? 'other';
+    categoryTotalsMap.set(cat, (categoryTotalsMap.get(cat) ?? 0) + l.totalActiveSeconds);
+  });
+  const totalSeconds7 = [...categoryTotalsMap.values()].reduce((a, b) => a + b, 0);
+  const categoryBreakdown = [...categoryTotalsMap.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([category, seconds]) => ({
+      category,
+      seconds,
+      percent: totalSeconds7 > 0 ? (seconds / totalSeconds7) * 100 : 0,
+    }));
 
   // --- Heatmap: last 12 weeks (84 days) ---
   const HEATMAP_WEEKS = 12;
@@ -141,8 +253,87 @@ export default function AnalyticsPanel({ logs, exercises, onClearLogs }: Analyti
   });
   const holdPBList = [...holdPBs.entries()].sort((a, b) => b[1] - a[1]);
 
+  // --- History log filtering ---
+  const rangeStart =
+    filterRange === '7d'  ? startOfToday - 7  * 86400000 :
+    filterRange === '30d' ? startOfToday - 30 * 86400000 :
+    filterRange === '90d' ? startOfToday - 90 * 86400000 :
+    0;
+  const filteredLogs = logs.filter(l => {
+    if (l.timestamp < rangeStart) return false;
+    if (filterCategory !== 'all' && (l.category ?? 'other') !== filterCategory) return false;
+    if (filterExercise !== 'all' && l.exerciseName !== filterExercise) return false;
+    return true;
+  });
+  const uniqueExerciseNames = Array.from(new Set(logs.map(l => l.exerciseName))).sort();
+  const hasActiveFilter = filterRange !== 'all' || filterCategory !== 'all' || filterExercise !== 'all';
+
+  const handleExportLogs = (fmt: 'json' | 'csv') => {
+    if (filteredLogs.length === 0) return;
+    const stamp = new Date().toISOString().slice(0, 10);
+    const tag = hasActiveFilter ? '-filtered' : '';
+    if (fmt === 'json') {
+      downloadFile(`pulse-history${tag}-${stamp}.json`, exportLogsJSON(filteredLogs), 'application/json');
+    } else {
+      downloadFile(`pulse-history${tag}-${stamp}.csv`, exportLogsCSV(filteredLogs), 'text/csv');
+    }
+  };
+
+  const resetFilters = () => {
+    setFilterRange('all');
+    setFilterCategory('all');
+    setFilterExercise('all');
+  };
+
   return (
     <div className="w-full flex flex-col gap-6 text-natural-dark">
+
+      {/* Coach's Note (opt-in AI insights) */}
+      <AnimatePresence>
+        {aiEligible && (aiLoading || (aiInsights && aiInsights.length > 0)) && (
+          <motion.div
+            key="coach-note"
+            initial={{ opacity: 0, y: -6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            className="p-4 bg-gradient-to-br from-natural-moss/5 to-natural-terracotta/5 border border-natural-moss/25 rounded-2xl shadow-sm flex flex-col gap-3"
+          >
+            <div className="flex justify-between items-center gap-2">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-natural-moss flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5" />
+                Coach's Note · {todayShort}
+              </span>
+              <button
+                onClick={handleAiDismiss}
+                aria-label="Dismiss today's note"
+                title="Dismiss for today"
+                className="p-1 -mr-1 rounded text-[#70706B] hover:text-natural-dark hover:bg-white/60 cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            {aiLoading || !aiInsights ? (
+              <div className="flex flex-col gap-2">
+                <div className="h-3 bg-natural-bg/80 rounded animate-pulse" />
+                <div className="h-3 bg-natural-bg/80 rounded animate-pulse w-3/4" />
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2.5">
+                {aiInsights.map(ins => (
+                  <div key={ins.id} className="flex gap-2.5 text-xs leading-relaxed">
+                    <span className={`w-0.5 self-stretch rounded-full flex-shrink-0 ${
+                      ins.tone === 'positive' ? 'bg-natural-moss' :
+                      ins.tone === 'nudge'    ? 'bg-natural-terracotta' :
+                                                'bg-[#8B8B80]'
+                    }`} />
+                    <p className="text-natural-dark">{ins.text}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* 0. Today's Status */}
       <div
@@ -214,12 +405,12 @@ export default function AnalyticsPanel({ logs, exercises, onClearLogs }: Analyti
         </div>
       </div>
 
-      {/* 2. Weekly + Monthly Goals (real targets) */}
+      {/* 2. This Week — Adherence + Category Mix */}
       <div className="p-5 bg-white rounded-2xl border border-natural-border shadow-sm flex flex-col gap-4">
         <div className="flex justify-between items-center">
           <h3 className="text-xs font-bold text-natural-moss tracking-wider uppercase flex items-center gap-2">
             <TrendingUp className="w-4 h-4 text-natural-moss" />
-            Progress Goals
+            This Week
           </h3>
           {logs.length > 0 && (
             <span
@@ -231,55 +422,88 @@ export default function AnalyticsPanel({ logs, exercises, onClearLogs }: Analyti
                     : 'bg-natural-bg text-[#70706B]'
               }`}
             >
-              {weekDelta > 0 ? `+${weekDelta} vs last week` : weekDelta < 0 ? `${weekDelta} vs last week` : 'same as last week'}
+              {weekDelta > 0 ? `+${weekDelta} vs last` : weekDelta < 0 ? `${weekDelta} vs last` : 'same as last'}
             </span>
           )}
         </div>
 
-        <div className="flex flex-col gap-3">
-          <div className="flex flex-col gap-2 p-3 bg-natural-bg/50 border border-natural-border rounded-xl">
-            <div className="flex justify-between items-center text-xs">
-              <span className="font-bold text-natural-dark flex items-center gap-1.5">
-                <Calendar className="w-3.5 h-3.5 text-natural-moss" />
-                Weekly Goal
-              </span>
-              <span className="font-mono font-bold text-natural-moss">
-                {sessionsLast7} / {targetWeeklyWorkouts} sessions
-              </span>
-            </div>
-            <div className="w-full h-2.5 bg-natural-border rounded-full overflow-hidden shadow-inner">
+        {/* Plan Adherence */}
+        <div className="flex flex-col gap-2">
+          <div className="flex justify-between items-baseline">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-[#70706B] flex items-center gap-1.5">
+              <Target className="w-3.5 h-3.5 text-natural-moss" />
+              Plan Adherence
+            </span>
+            <span className="font-mono text-[11px] text-[#70706B] font-semibold">
+              {hasSchedule
+                ? `${completedSessions7} of ${scheduledSessions7} scheduled`
+                : `${sessionsLast7} session${sessionsLast7 === 1 ? '' : 's'}`}
+            </span>
+          </div>
+          <div className="flex items-end gap-3">
+            <span className="text-3xl font-black font-display text-natural-dark leading-none">
+              {hasSchedule ? `${adherencePercent}%` : '—'}
+            </span>
+            <span className="text-[10px] text-[#8B8B80] pb-1 leading-tight">
+              {hasSchedule
+                ? extraSessions7 > 0
+                  ? `of plan done · +${extraSessions7} extra session${extraSessions7 === 1 ? '' : 's'}`
+                  : 'of plan done'
+                : 'set weekday schedules in Program to track adherence'}
+            </span>
+          </div>
+          {hasSchedule && (
+            <div className="w-full h-2 bg-natural-border rounded-full overflow-hidden shadow-inner">
               <div
-                style={{ width: `${weeklyCompliancePercent}%` }}
+                style={{ width: `${adherencePercent}%` }}
                 className="h-full bg-natural-moss rounded-full transition-all duration-500"
               />
             </div>
-            <div className="flex justify-between text-[10px] text-slate-400 font-medium">
-              <span>{weeklyCompliancePercent}% of goal</span>
-              <span>{sumWeeklyTargets > 0 ? 'derived from your program' : 'default — set weekly targets in Program tab'}</span>
-            </div>
-          </div>
+          )}
+        </div>
 
-          <div className="flex flex-col gap-2 p-3 bg-natural-bg/50 border border-natural-border rounded-xl">
-            <div className="flex justify-between items-center text-xs">
-              <span className="font-bold text-natural-dark flex items-center gap-1.5">
-                <CalendarDays className="w-3.5 h-3.5 text-natural-terracotta" />
-                Monthly Goal (L-30 Days)
+        {/* Category Mix */}
+        {totalSeconds7 > 0 && (
+          <div className="flex flex-col gap-2 pt-3 border-t border-natural-border">
+            <div className="flex justify-between items-center">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-[#70706B]">
+                Time by Category
               </span>
-              <span className="font-mono font-bold text-natural-terracotta">
-                {sessionsLast30} / {targetMonthlyWorkouts} sessions
+              <span className="font-mono text-[11px] text-[#70706B] font-semibold">
+                {formatDuration(totalSeconds7)}
               </span>
             </div>
-            <div className="w-full h-2.5 bg-natural-border rounded-full overflow-hidden shadow-inner">
-              <div
-                style={{ width: `${monthlyCompliancePercent}%` }}
-                className="h-full bg-natural-terracotta rounded-full transition-all duration-500"
-              />
+            <div className="w-full h-3 rounded-full overflow-hidden flex shadow-inner bg-natural-border">
+              {categoryBreakdown.map(b => (
+                <div
+                  key={b.category}
+                  style={{ width: `${b.percent}%` }}
+                  className={`h-full ${CATEGORY_BAR_COLORS[b.category]?.fill ?? 'bg-slate-400'} transition-all duration-500`}
+                  title={`${CATEGORY_BAR_COLORS[b.category]?.label ?? b.category}: ${formatDuration(b.seconds)}`}
+                />
+              ))}
             </div>
-            <div className="flex justify-between text-[10px] text-slate-400 font-medium">
-              <span>{monthlyCompliancePercent}% of goal</span>
-              <span>Target: {targetMonthlyWorkouts} sessions / month</span>
+            <div className="flex flex-wrap gap-x-3 gap-y-1 pt-0.5">
+              {categoryBreakdown.map(b => (
+                <div key={b.category} className="flex items-center gap-1.5 text-[10px]">
+                  <span className={`w-2 h-2 rounded-full ${CATEGORY_BAR_COLORS[b.category]?.dot ?? 'bg-slate-400'}`} />
+                  <span className="font-semibold text-natural-dark">
+                    {CATEGORY_BAR_COLORS[b.category]?.label ?? b.category}
+                  </span>
+                  <span className="text-[#8B8B80] font-mono">{formatDuration(b.seconds)}</span>
+                </div>
+              ))}
             </div>
           </div>
+        )}
+
+        {/* 30-day footer */}
+        <div className="pt-2 border-t border-natural-border flex justify-between items-center text-[10px] text-[#8B8B80]">
+          <span className="font-bold uppercase tracking-wider">Last 30 Days</span>
+          <span className="font-mono font-semibold text-natural-dark">
+            {sessionsLast30} session{sessionsLast30 === 1 ? '' : 's'}
+            {sessionsLast30 > 0 && ` · ${formatDuration(secondsLast30)}`}
+          </span>
         </div>
       </div>
 
@@ -338,7 +562,11 @@ export default function AnalyticsPanel({ logs, exercises, onClearLogs }: Analyti
             <div className="flex flex-col gap-2">
               <span className="text-[10px] font-bold uppercase tracking-wider text-[#70706B]">By frequency</span>
               {topByFreq.map(([name, stats], i) => (
-                <div key={name} className="flex items-center gap-2 text-xs">
+                <button
+                  key={name}
+                  onClick={() => openDetail(name)}
+                  className="flex items-center gap-2 text-xs text-left w-full p-1 -m-1 rounded-lg hover:bg-natural-bg/60 transition cursor-pointer"
+                >
                   <span className="w-4 h-4 rounded-full bg-natural-moss/10 text-natural-moss font-bold text-[9px] flex items-center justify-center flex-shrink-0">
                     {i + 1}
                   </span>
@@ -352,7 +580,7 @@ export default function AnalyticsPanel({ logs, exercises, onClearLogs }: Analyti
                     </div>
                     <span className="font-mono font-bold text-natural-moss text-[11px] w-7 text-right">{stats.count}×</span>
                   </div>
-                </div>
+                </button>
               ))}
             </div>
           )}
@@ -361,7 +589,11 @@ export default function AnalyticsPanel({ logs, exercises, onClearLogs }: Analyti
             <div className="flex flex-col gap-2 pt-2 border-t border-natural-border">
               <span className="text-[10px] font-bold uppercase tracking-wider text-[#70706B]">By time under tension</span>
               {topByTime.map(([name, stats], i) => (
-                <div key={name} className="flex items-center gap-2 text-xs">
+                <button
+                  key={name}
+                  onClick={() => openDetail(name)}
+                  className="flex items-center gap-2 text-xs text-left w-full p-1 -m-1 rounded-lg hover:bg-natural-bg/60 transition cursor-pointer"
+                >
                   <span className="w-4 h-4 rounded-full bg-natural-terracotta/10 text-natural-terracotta font-bold text-[9px] flex items-center justify-center flex-shrink-0">
                     {i + 1}
                   </span>
@@ -375,7 +607,7 @@ export default function AnalyticsPanel({ logs, exercises, onClearLogs }: Analyti
                     </div>
                     <span className="font-mono font-bold text-natural-terracotta text-[11px] w-12 text-right">{formatDuration(stats.seconds)}</span>
                   </div>
-                </div>
+                </button>
               ))}
             </div>
           )}
@@ -391,53 +623,201 @@ export default function AnalyticsPanel({ logs, exercises, onClearLogs }: Analyti
           </h3>
           <div className="flex flex-col gap-2">
             {holdPBList.map(([name, secs]) => (
-              <div key={name} className="flex items-center justify-between gap-3 p-2.5 bg-amber-50 border border-amber-200 rounded-xl">
+              <button
+                key={name}
+                onClick={() => openDetail(name)}
+                className="flex items-center justify-between gap-3 p-2.5 bg-amber-50 border border-amber-200 rounded-xl hover:bg-amber-100/70 transition cursor-pointer text-left"
+              >
                 <span className="font-semibold text-natural-dark text-xs truncate">{name}</span>
                 <span className="font-mono font-black text-amber-700 text-sm whitespace-nowrap">
                   {formatHold(secs)}
                 </span>
-              </div>
+              </button>
             ))}
           </div>
         </div>
       )}
 
+      <ExerciseDetailSheet
+        exerciseName={detailExerciseName}
+        logs={logs}
+        exercises={exercises}
+        onClose={() => setDetailExerciseName(null)}
+      />
+
       {/* 6. Program History Log */}
       <div className="p-5 bg-white rounded-2xl border border-natural-border shadow-sm flex flex-col gap-4">
-        <div className="flex justify-between items-center">
-          <h3 className="text-xs font-bold text-natural-moss tracking-wider uppercase flex items-center gap-2">
+        <div className="flex justify-between items-center gap-2">
+          <h3 className="text-xs font-bold text-natural-moss tracking-wider uppercase flex items-center gap-2 flex-wrap">
             <Calendar className="w-4 h-4 text-natural-moss" />
             History Log
+            {logs.length > 0 && (
+              <span className="text-[10px] text-[#8B8B80] font-normal normal-case tracking-normal">
+                · {hasActiveFilter
+                    ? `${filteredLogs.length} of ${logs.length}`
+                    : `${logs.length} entr${logs.length === 1 ? 'y' : 'ies'}`}
+              </span>
+            )}
           </h3>
-          {logs.length > 0 && (
-            <button
-              onClick={() => {
-                if (confirm('Clear your entire workout history?')) onClearLogs();
-              }}
-              className="text-[10px] tracking-wide font-bold text-red-500 hover:text-red-700 transition flex items-center gap-0.5 cursor-pointer"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              CLEAR ALL
-            </button>
-          )}
+          <div className="flex items-center gap-1 flex-shrink-0">
+            {logs.length > 0 && (
+              <button
+                onClick={() => setShowFilters(v => !v)}
+                className={`p-1.5 rounded-lg transition cursor-pointer ${
+                  showFilters || hasActiveFilter
+                    ? 'bg-natural-moss/10 text-natural-moss'
+                    : 'text-[#70706B] hover:bg-natural-bg hover:text-natural-dark'
+                }`}
+                aria-label="Filter and export"
+                title="Filter & export"
+              >
+                <SlidersHorizontal className="w-3.5 h-3.5" />
+              </button>
+            )}
+            {logs.length > 0 && (
+              <button
+                onClick={() => {
+                  if (confirm('Clear your entire workout history?')) onClearLogs();
+                }}
+                className="text-[10px] tracking-wide font-bold text-red-500 hover:text-red-700 transition flex items-center gap-0.5 cursor-pointer px-1"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                CLEAR ALL
+              </button>
+            )}
+          </div>
         </div>
+
+        {/* Filter + Export panel */}
+        <AnimatePresence>
+          {showFilters && logs.length > 0 && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="overflow-hidden"
+            >
+              <div className="flex flex-col gap-3 p-3 bg-natural-bg/60 border border-natural-border rounded-xl">
+                {/* Date range */}
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-[#70706B]">Date range</span>
+                  <div className="flex gap-1.5">
+                    {(['all', '7d', '30d', '90d'] as const).map(r => (
+                      <button
+                        key={r}
+                        onClick={() => setFilterRange(r)}
+                        className={`flex-1 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wide transition cursor-pointer ${
+                          filterRange === r
+                            ? 'bg-natural-moss text-white'
+                            : 'bg-white border border-natural-border text-[#70706B] hover:border-natural-moss/40'
+                        }`}
+                      >
+                        {r === 'all' ? 'All' : r}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Category */}
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-[#70706B]">Category</span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {CATEGORY_FILTER_OPTIONS.map(opt => (
+                      <button
+                        key={opt.value}
+                        onClick={() => setFilterCategory(opt.value)}
+                        className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide border transition cursor-pointer ${
+                          filterCategory === opt.value
+                            ? 'bg-natural-dark text-white border-natural-dark'
+                            : 'bg-white text-[#70706B] border-natural-border hover:border-natural-dark/30'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Exercise dropdown — only useful when there are multiple distinct names */}
+                {uniqueExerciseNames.length > 1 && (
+                  <div className="flex flex-col gap-1.5">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-[#70706B]">Exercise</span>
+                    <select
+                      value={filterExercise}
+                      onChange={e => setFilterExercise(e.target.value)}
+                      className="w-full px-3 py-2 bg-white border border-natural-border rounded-lg text-xs text-natural-dark focus:outline-none focus:border-natural-moss cursor-pointer"
+                    >
+                      <option value="all">All exercises</option>
+                      {uniqueExerciseNames.map(n => (
+                        <option key={n} value={n}>{n}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {/* Export */}
+                <div className="flex flex-col gap-1.5 pt-2 border-t border-natural-border">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-[#70706B]">
+                    Export {hasActiveFilter ? `${filteredLogs.length} filtered` : `all ${logs.length}`}
+                  </span>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => handleExportLogs('json')}
+                      disabled={filteredLogs.length === 0}
+                      className="flex items-center justify-center gap-1.5 py-2 bg-white border border-natural-border text-natural-moss rounded-lg text-[10px] font-bold uppercase tracking-wide hover:bg-natural-border/40 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                    >
+                      <Download className="w-3 h-3" /> JSON
+                    </button>
+                    <button
+                      onClick={() => handleExportLogs('csv')}
+                      disabled={filteredLogs.length === 0}
+                      className="flex items-center justify-center gap-1.5 py-2 bg-white border border-natural-border text-natural-moss rounded-lg text-[10px] font-bold uppercase tracking-wide hover:bg-natural-border/40 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                    >
+                      <Download className="w-3 h-3" /> CSV
+                    </button>
+                  </div>
+                </div>
+
+                {hasActiveFilter && (
+                  <button
+                    onClick={resetFilters}
+                    className="text-[10px] font-bold text-natural-terracotta hover:text-[#C27A62] tracking-wide uppercase cursor-pointer self-start"
+                  >
+                    Reset filters
+                  </button>
+                )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         <div className="flex flex-col gap-2.5 max-h-64 overflow-y-auto pr-1">
           {logs.length === 0 ? (
             <div className="text-center py-8 bg-natural-bg/50 border border-dashed border-natural-border rounded-xl">
               <p className="text-xs text-slate-500">Every completed exercise writes a local log. Start training to fill this up.</p>
             </div>
+          ) : filteredLogs.length === 0 ? (
+            <div className="text-center py-6 bg-natural-bg/40 border border-dashed border-natural-border rounded-xl">
+              <p className="text-xs text-[#70706B]">No sessions match your filters.</p>
+              <button
+                onClick={resetFilters}
+                className="text-[10px] font-bold text-natural-moss hover:text-[#4E4E36] uppercase tracking-wide mt-2 cursor-pointer"
+              >
+                Reset filters
+              </button>
+            </div>
           ) : (
-            [...logs].reverse().map((log) => {
+            [...filteredLogs].reverse().map((log) => {
               const dt = new Date(log.timestamp);
               const dateStr = dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
               const timeStr = dt.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true });
               const isHold = log.mode === 'hold';
 
               return (
-                <div
+                <button
                   key={log.id}
-                  className="p-3 bg-natural-bg rounded-xl border border-natural-border flex items-center justify-between gap-3 text-xs"
+                  onClick={() => openDetail(log.exerciseName)}
+                  className="w-full text-left p-3 bg-natural-bg rounded-xl border border-natural-border hover:bg-natural-bg/60 hover:border-natural-moss/30 transition flex items-center justify-between gap-3 text-xs cursor-pointer"
                 >
                   <div className="flex items-start gap-2.5 min-w-0">
                     {isHold ? (
@@ -463,7 +843,7 @@ export default function AnalyticsPanel({ logs, exercises, onClearLogs }: Analyti
                   <div className={`font-bold font-mono shrink-0 whitespace-nowrap ${isHold ? 'text-amber-700' : 'text-natural-moss'}`}>
                     +{formatDuration(log.totalActiveSeconds)}
                   </div>
-                </div>
+                </button>
               );
             })
           )}

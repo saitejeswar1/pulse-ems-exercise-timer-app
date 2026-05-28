@@ -13,6 +13,7 @@ export interface WorkoutSettings {
   volume: number;    // 0 - 100
   vibrate: boolean;
   wakelock: boolean;
+  aiInsightsEnabled?: boolean; // opt-in; default false
 }
 
 export type WorkoutPhase = 'idle' | 'active' | 'rest' | 'transition' | 'done';
