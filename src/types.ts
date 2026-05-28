@@ -14,6 +14,7 @@ export interface WorkoutSettings {
   vibrate: boolean;
   wakelock: boolean;
   aiInsightsEnabled?: boolean; // opt-in; default false
+  aiInsightsAutoDay?: number | null; // 0=Sun..6=Sat for weekly auto-refresh, null=manual only
 }
 
 export type WorkoutPhase = 'idle' | 'active' | 'rest' | 'transition' | 'done';

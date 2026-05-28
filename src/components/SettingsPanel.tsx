@@ -24,7 +24,7 @@ interface SettingsPanelProps {
 
 export default function SettingsPanel({ settings, onChange, onClose }: SettingsPanelProps) {
   
-  const handleTimingChange = (key: keyof WorkoutSettings, val: number | boolean | string) => {
+  const handleTimingChange = (key: keyof WorkoutSettings, val: number | boolean | string | null) => {
     const updated = { ...settings, [key]: val };
     onChange(updated);
   };
@@ -360,8 +360,49 @@ export default function SettingsPanel({ settings, onChange, onClose }: SettingsP
           </button>
         </div>
 
+        {settings.aiInsightsEnabled && (
+          <div className="p-3.5 bg-natural-bg rounded-xl border border-natural-border flex flex-col gap-2">
+            <div className="flex justify-between items-center gap-3">
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-semibold text-natural-dark">Auto-refresh day</div>
+                <div className="text-[11px] text-[#70706B] mt-0.5 leading-relaxed">
+                  Insights auto-generate once a week on this day. You can also tap the refresh button on the Progress tab (max 2 per day).
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-1 flex-wrap">
+              {(['Sun','Mon','Tue','Wed','Thu','Fri','Sat'] as const).map((label, idx) => {
+                const active = settings.aiInsightsAutoDay === idx;
+                return (
+                  <button
+                    key={label}
+                    onClick={() => handleTimingChange('aiInsightsAutoDay', idx)}
+                    className={`px-2.5 py-1 rounded-full text-[11px] font-semibold transition-colors ${
+                      active
+                        ? 'bg-natural-moss text-white'
+                        : 'bg-white text-natural-dark border border-natural-border hover:bg-natural-moss/5'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+              <button
+                onClick={() => handleTimingChange('aiInsightsAutoDay', null)}
+                className={`px-2.5 py-1 rounded-full text-[11px] font-semibold transition-colors ${
+                  settings.aiInsightsAutoDay == null
+                    ? 'bg-[#70706B] text-white'
+                    : 'bg-white text-natural-dark border border-natural-border hover:bg-natural-moss/5'
+                }`}
+              >
+                Off
+              </button>
+            </div>
+          </div>
+        )}
+
         <p className="text-[10px] text-[#8B8B80] italic leading-relaxed">
-          Currently running on a local stub — no network calls yet. A free-tier backend will be wired in a later release. Disabling clears any cached insights from this device.
+          Disabling clears any cached insights and refresh history from this device.
         </p>
       </div>
 

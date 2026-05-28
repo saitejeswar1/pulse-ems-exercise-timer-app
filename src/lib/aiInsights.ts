@@ -4,6 +4,10 @@ const WEEKDAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 const CACHE_KEY = 'pulse-ai-insights';
 const DISMISS_KEY = 'pulse-ai-dismissed';
+const USAGE_KEY = 'pulse-ai-usage';
+
+export const MANUAL_COOLDOWN_MS = 30 * 60 * 1000;
+export const MANUAL_MAX_PER_DAY = 2;
 
 // ---- Public types ----
 
@@ -250,14 +254,21 @@ interface CachedPayload {
   insights: Insight[];
 }
 
-export function loadCachedInsights(stats: StatsBlob): Insight[] | null {
+export interface CachedInsightsView {
+  insights: Insight[];
+  generatedAt: string; // YYYY-MM-DD
+}
+
+// Cache no longer auto-invalidates daily — insights are intentionally weekly.
+// Hash mismatch (significant new logged activity) still busts the cache so a
+// burst of new sessions doesn't go un-noticed until the next auto-refresh day.
+export function loadCachedInsights(stats: StatsBlob): CachedInsightsView | null {
   try {
     const raw = localStorage.getItem(CACHE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as CachedPayload;
-    if (parsed.date !== todayDateString()) return null;
     if (parsed.hash !== hashStats(stats)) return null;
-    return parsed.insights;
+    return { insights: parsed.insights, generatedAt: parsed.date };
   } catch {
     return null;
   }
@@ -278,7 +289,94 @@ export function clearAIArtifacts(): void {
   try {
     localStorage.removeItem(CACHE_KEY);
     localStorage.removeItem(DISMISS_KEY);
+    localStorage.removeItem(USAGE_KEY);
   } catch {}
+}
+
+// ---- Usage tracking: 2 manual triggers/day with 30-min cooldown, weekly auto on chosen day ----
+
+interface UsageRecord {
+  date: string;             // YYYY-MM-DD; manual counters reset when this changes
+  manualCount: number;
+  lastManualAt: number;     // epoch ms; 0 if no manual today
+  autoFiredOnDate: string | null; // last date the weekly auto-refresh successfully fired
+}
+
+function loadUsage(): UsageRecord {
+  const empty: UsageRecord = { date: todayDateString(), manualCount: 0, lastManualAt: 0, autoFiredOnDate: null };
+  try {
+    const raw = localStorage.getItem(USAGE_KEY);
+    if (!raw) return empty;
+    const parsed = JSON.parse(raw) as Partial<UsageRecord>;
+    return {
+      date: parsed.date ?? empty.date,
+      manualCount: parsed.manualCount ?? 0,
+      lastManualAt: parsed.lastManualAt ?? 0,
+      autoFiredOnDate: parsed.autoFiredOnDate ?? null,
+    };
+  } catch {
+    return empty;
+  }
+}
+
+function saveUsage(u: UsageRecord): void {
+  try { localStorage.setItem(USAGE_KEY, JSON.stringify(u)); } catch {}
+}
+
+export type ManualRefreshBlockReason = 'cooldown' | 'max-reached';
+
+export interface ManualRefreshState {
+  allowed: boolean;
+  reason?: ManualRefreshBlockReason;
+  cooldownEndsAt?: number;  // epoch ms (only when reason === 'cooldown')
+  triggersUsedToday: number;
+  triggersRemainingToday: number;
+}
+
+export function getManualRefreshState(now: number = Date.now()): ManualRefreshState {
+  const today = todayDateString();
+  const u = loadUsage();
+  const usedToday = u.date === today ? u.manualCount : 0;
+  const lastAt    = u.date === today ? u.lastManualAt : 0;
+  const remaining = Math.max(0, MANUAL_MAX_PER_DAY - usedToday);
+
+  if (usedToday >= MANUAL_MAX_PER_DAY) {
+    return { allowed: false, reason: 'max-reached', triggersUsedToday: usedToday, triggersRemainingToday: 0 };
+  }
+  const cooldownEndsAt = lastAt + MANUAL_COOLDOWN_MS;
+  if (lastAt > 0 && now < cooldownEndsAt) {
+    return { allowed: false, reason: 'cooldown', cooldownEndsAt, triggersUsedToday: usedToday, triggersRemainingToday: remaining };
+  }
+  return { allowed: true, triggersUsedToday: usedToday, triggersRemainingToday: remaining };
+}
+
+// Counted only on successful generation so a failed call doesn't burn the user's quota.
+export function recordManualTrigger(now: number = Date.now()): void {
+  const today = todayDateString();
+  const u = loadUsage();
+  if (u.date !== today) {
+    saveUsage({ date: today, manualCount: 1, lastManualAt: now, autoFiredOnDate: u.autoFiredOnDate });
+  } else {
+    saveUsage({ ...u, manualCount: u.manualCount + 1, lastManualAt: now });
+  }
+}
+
+export function shouldAutoRefresh(autoDay: number | null | undefined, now: Date = new Date()): boolean {
+  if (autoDay == null) return false;
+  if (now.getDay() !== autoDay) return false;
+  const u = loadUsage();
+  return u.autoFiredOnDate !== todayDateString();
+}
+
+export function recordAutoFired(): void {
+  const today = todayDateString();
+  const u = loadUsage();
+  // Reset daily counters if the date rolled while we held a stale record.
+  if (u.date !== today) {
+    saveUsage({ date: today, manualCount: 0, lastManualAt: 0, autoFiredOnDate: today });
+  } else {
+    saveUsage({ ...u, autoFiredOnDate: today });
+  }
 }
 
 // ---- Dismiss (per-day) ----

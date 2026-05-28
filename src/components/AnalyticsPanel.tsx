@@ -3,7 +3,7 @@ import { WorkoutLogEntry, PhysioExercise } from '../types';
 import {
   Award, Calendar, Clock, TrendingUp, CheckCircle, Trash2,
   CheckCircle2, Flame, Hourglass, Trophy, ListChecks, Coffee, Target,
-  SlidersHorizontal, Download, Sparkles, X,
+  SlidersHorizontal, Download, Sparkles, X, RefreshCw,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ExerciseDetailSheet from './ExerciseDetailSheet';
@@ -12,6 +12,8 @@ import { downloadFile } from '../lib/planIO';
 import {
   buildStatsBlob, generateInsights, loadCachedInsights, saveCachedInsights,
   isDismissedToday, dismissForToday, Insight,
+  getManualRefreshState, recordManualTrigger, shouldAutoRefresh, recordAutoFired,
+  ManualRefreshState,
 } from '../lib/aiInsights';
 
 type FilterRange = 'all' | '7d' | '30d' | '90d';
@@ -28,6 +30,7 @@ interface AnalyticsPanelProps {
   logs: WorkoutLogEntry[];
   exercises: PhysioExercise[];
   aiEnabled?: boolean;
+  aiAutoDay?: number | null;
   onClearLogs: () => void;
 }
 
@@ -58,7 +61,7 @@ const formatHold = (s: number) => {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 };
 
-export default function AnalyticsPanel({ logs, exercises, aiEnabled, onClearLogs }: AnalyticsPanelProps) {
+export default function AnalyticsPanel({ logs, exercises, aiEnabled, aiAutoDay, onClearLogs }: AnalyticsPanelProps) {
   const [detailExerciseName, setDetailExerciseName] = useState<string | null>(null);
   const openDetail = (name: string) => setDetailExerciseName(name);
 
@@ -70,43 +73,96 @@ export default function AnalyticsPanel({ logs, exercises, aiEnabled, onClearLogs
 
   // AI Coach card state
   const [aiInsights, setAiInsights] = useState<Insight[] | null>(null);
+  const [aiGeneratedAt, setAiGeneratedAt] = useState<string | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
+  const [aiAttempted, setAiAttempted] = useState(false); // distinguishes "never tried" from "tried + got nothing"
   const [aiDismissed, setAiDismissed] = useState<boolean>(() => isDismissedToday());
+  const [refreshState, setRefreshState] = useState<ManualRefreshState>(() => getManualRefreshState());
 
-  // Show the card only when opted in, with at least 3 sessions to draw signal from,
-  // and not dismissed for today.
   const minSessionsForAI = 3;
   const aiEligible = (aiEnabled ?? false) && logs.length >= minSessionsForAI && !aiDismissed;
 
+  // Load cache + optionally fire the weekly auto-refresh on the user's chosen day.
   useEffect(() => {
     if (!aiEligible) {
       setAiInsights(null);
+      setAiGeneratedAt(null);
+      setAiAttempted(false);
       return;
     }
-    let cancelled = false;
     const stats = buildStatsBlob(logs, exercises);
     const cached = loadCachedInsights(stats);
     if (cached) {
-      setAiInsights(cached);
-      return;
+      setAiInsights(cached.insights);
+      setAiGeneratedAt(cached.generatedAt);
+      setAiAttempted(true);
+    } else {
+      setAiInsights(null);
+      setAiGeneratedAt(null);
+      setAiAttempted(false);
     }
+
+    if (shouldAutoRefresh(aiAutoDay)) {
+      triggerGenerate('auto');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aiEligible, aiAutoDay, logs, exercises]);
+
+  // Tick the refresh-state every 30s so the cooldown countdown stays current.
+  useEffect(() => {
+    if (refreshState.allowed || refreshState.reason !== 'cooldown') return;
+    const id = setInterval(() => setRefreshState(getManualRefreshState()), 30_000);
+    return () => clearInterval(id);
+  }, [refreshState]);
+
+  const triggerGenerate = async (source: 'manual' | 'auto') => {
+    if (source === 'manual' && !refreshState.allowed) return;
+    if (aiLoading) return;
     setAiLoading(true);
-    generateInsights(stats)
-      .then(insights => {
-        if (cancelled) return;
-        setAiInsights(insights);
-        if (insights.length > 0) saveCachedInsights(stats, insights);
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (!cancelled) setAiLoading(false);
-      });
-    return () => { cancelled = true; };
-  }, [aiEligible, logs, exercises]);
+    // Auto-refresh: mark "attempted today" up front so a transient failure
+    // doesn't cause the effect to re-fire on the next log change. Manual
+    // triggers, by contrast, only count on success — so users aren't punished
+    // for network blips.
+    if (source === 'auto') recordAutoFired();
+    try {
+      const stats = buildStatsBlob(logs, exercises);
+      const insights = await generateInsights(stats);
+      setAiAttempted(true);
+      setAiInsights(insights);
+      if (insights.length > 0) {
+        saveCachedInsights(stats, insights);
+        setAiGeneratedAt(new Date().toISOString().slice(0, 10));
+        if (source === 'manual') recordManualTrigger();
+      }
+    } finally {
+      setAiLoading(false);
+      setRefreshState(getManualRefreshState());
+    }
+  };
 
   const handleAiDismiss = () => {
     dismissForToday();
     setAiDismissed(true);
+  };
+
+  const refreshLabel = (() => {
+    if (refreshState.allowed) {
+      const left = refreshState.triggersRemainingToday;
+      return left >= 2 ? 'Refresh' : `Refresh (${left} left today)`;
+    }
+    if (refreshState.reason === 'max-reached') return 'Daily limit reached';
+    if (refreshState.reason === 'cooldown' && refreshState.cooldownEndsAt) {
+      const mins = Math.max(1, Math.ceil((refreshState.cooldownEndsAt - Date.now()) / 60_000));
+      return `Available in ${mins}m`;
+    }
+    return 'Refresh';
+  })();
+
+  const formatGeneratedAt = (iso: string) => {
+    // iso is YYYY-MM-DD; render as "May 28" — concise, glanceable.
+    const [y, m, d] = iso.split('-').map(Number);
+    const dt = new Date(y, (m ?? 1) - 1, d ?? 1);
+    return dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
   };
 
   const now = new Date();
@@ -290,7 +346,7 @@ export default function AnalyticsPanel({ logs, exercises, aiEnabled, onClearLogs
 
       {/* Coach's Note (opt-in AI insights) */}
       <AnimatePresence>
-        {aiEligible && (aiLoading || (aiInsights && aiInsights.length > 0)) && (
+        {aiEligible && (
           <motion.div
             key="coach-note"
             initial={{ opacity: 0, y: -6 }}
@@ -301,7 +357,7 @@ export default function AnalyticsPanel({ logs, exercises, aiEnabled, onClearLogs
             <div className="flex justify-between items-center gap-2">
               <span className="text-[10px] font-bold uppercase tracking-wider text-natural-moss flex items-center gap-1.5">
                 <Sparkles className="w-3.5 h-3.5" />
-                Coach's Note · {todayShort}
+                Coach's Note{aiGeneratedAt ? ` · ${formatGeneratedAt(aiGeneratedAt)}` : ` · ${todayShort}`}
               </span>
               <button
                 onClick={handleAiDismiss}
@@ -312,23 +368,59 @@ export default function AnalyticsPanel({ logs, exercises, aiEnabled, onClearLogs
                 <X className="w-3.5 h-3.5" />
               </button>
             </div>
-            {aiLoading || !aiInsights ? (
+
+            {aiLoading ? (
               <div className="flex flex-col gap-2">
                 <div className="h-3 bg-natural-bg/80 rounded animate-pulse" />
                 <div className="h-3 bg-natural-bg/80 rounded animate-pulse w-3/4" />
               </div>
+            ) : aiInsights && aiInsights.length > 0 ? (
+              <>
+                <div className="flex flex-col gap-2.5">
+                  {aiInsights.map(ins => (
+                    <div key={ins.id} className="flex gap-2.5 text-xs leading-relaxed">
+                      <span className={`w-0.5 self-stretch rounded-full flex-shrink-0 ${
+                        ins.tone === 'positive' ? 'bg-natural-moss' :
+                        ins.tone === 'nudge'    ? 'bg-natural-terracotta' :
+                                                  'bg-[#8B8B80]'
+                      }`} />
+                      <p className="text-natural-dark">{ins.text}</p>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex justify-end">
+                  <button
+                    onClick={() => triggerGenerate('manual')}
+                    disabled={!refreshState.allowed}
+                    className={`flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1 rounded-full transition-colors ${
+                      refreshState.allowed
+                        ? 'text-natural-moss hover:bg-natural-moss/10 cursor-pointer'
+                        : 'text-[#A8A89F] cursor-not-allowed'
+                    }`}
+                  >
+                    <RefreshCw className="w-3 h-3" />
+                    {refreshLabel}
+                  </button>
+                </div>
+              </>
             ) : (
-              <div className="flex flex-col gap-2.5">
-                {aiInsights.map(ins => (
-                  <div key={ins.id} className="flex gap-2.5 text-xs leading-relaxed">
-                    <span className={`w-0.5 self-stretch rounded-full flex-shrink-0 ${
-                      ins.tone === 'positive' ? 'bg-natural-moss' :
-                      ins.tone === 'nudge'    ? 'bg-natural-terracotta' :
-                                                'bg-[#8B8B80]'
-                    }`} />
-                    <p className="text-natural-dark">{ins.text}</p>
-                  </div>
-                ))}
+              <div className="flex flex-col items-start gap-2">
+                <p className="text-xs text-[#70706B] leading-relaxed">
+                  {aiAttempted
+                    ? "Couldn't generate insights just now. Tap to try again."
+                    : 'Get a short, AI-written coach note based on your last 30 days.'}
+                </p>
+                <button
+                  onClick={() => triggerGenerate('manual')}
+                  disabled={!refreshState.allowed}
+                  className={`text-xs font-semibold px-3 py-1.5 rounded-full transition-colors ${
+                    refreshState.allowed
+                      ? 'bg-natural-moss text-white hover:bg-natural-moss/90 cursor-pointer'
+                      : 'bg-[#E5E5E0] text-[#8B8B80] cursor-not-allowed'
+                  }`}
+                >
+                  {refreshState.allowed ? 'Get insights' : refreshLabel}
+                </button>
               </div>
             )}
           </motion.div>

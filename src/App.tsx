@@ -21,6 +21,7 @@ const DEFAULTS: WorkoutSettings = {
   vibrate: false,
   wakelock: true,
   aiInsightsEnabled: false,
+  aiInsightsAutoDay: 0, // Sunday — weekly reflection day
 };
 
 const WEEKDAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -1088,6 +1089,7 @@ export default function App() {
                   logs={logs}
                   exercises={exercises}
                   aiEnabled={settings.aiInsightsEnabled ?? false}
+                  aiAutoDay={settings.aiInsightsAutoDay ?? null}
                   onClearLogs={() => setLogs([])}
                 />
               </motion.div>

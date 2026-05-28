@@ -15,6 +15,16 @@
   --color-natural-border: #E5E5E0;
 }
 
+/* Respect device safe areas (status bar handled natively via @capacitor/status-bar;
+   this picks up gesture-nav / home-button insets so content doesn't sit under them). */
+body {
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+  background-color: var(--color-natural-bg);
+}
+
 /* Base custom interactive states scrollbars */
 ::-webkit-scrollbar {
   width: 6px;
