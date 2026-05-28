@@ -64,11 +64,21 @@ Each completed exercise writes a local log entry. The dashboard surfaces it as:
   <img src="screenshots/progress_dashboard.png" alt="Progress dashboard" width="280" />
 </p>
 
+### AI Coach's Note (opt-in)
+A short, AI-written summary of your last 30 days appears at the top of the Progress tab — adherence wins, exercises trending up or down, and missed scheduled sessions worth checking in on. Plain prose, second-person, two lines max.
+
+* **Off by default.** Enable in **Settings → AI Insights**.
+* **Cadence you control.** Pick one weekday for automatic refresh; tap the **Refresh** button on the Progress tab for an on-demand re-roll (max 2 per day, 30-minute cooldown).
+* **Privacy-first contract.** Only an aggregated stats blob (~1 KB of counts, durations, adherence percentages, top exercises) leaves the device. **No raw logs, timestamps, notes, IDs, or personal information.**
+* **Dismiss anytime.** Tap the × on the card to hide today's note. Turning the feature off wipes every cached insight and refresh-history record from the device.
+
+The Gemini-backed serverless function that writes the prose is open-source at [`pulse-ai-backend`](https://github.com/saitejeswar1/pulse-ai-backend).
+
 ### Native Android polish
 * **Hardware back button** routes through the tab hierarchy — back from any section returns to the timer; back from the timer exits.
 * **Screen wake-lock** keeps the display on for the duration of an active workout.
+* **Status and navigation bars stay visible** with proper safe-area handling on Android 15+ (target SDK 36) — content never sits under the system bars or gesture pill.
 * **Clean, dark-mode-friendly palette** designed for low-light gym and clinic use.
-* Fully **offline** — all data is stored locally on your device. No accounts, no servers, no tracking.
 
 ---
 
@@ -111,7 +121,8 @@ EMS is one of several use cases Pulse supports today — not the only one.
 
 ## 🔒 Privacy
 
-* **Everything is local.** Your program, settings, and workout history live in your device's `localStorage`. Nothing is uploaded.
+* **Local by default.** Your program, settings, and workout history live in your device's `localStorage`. Nothing is uploaded.
+* **AI Coach's Note is opt-in.** When enabled, an anonymized aggregate (session counts, durations, adherence percentages, and your top exercises by name) is sent to Pulse's Gemini-backed coach to generate short prose insights. **Raw logs, timestamps, notes, and IDs never leave the device.** Disabling the toggle wipes every cached insight and refresh-history record.
 * **No accounts.** No login, no email, no telemetry.
 * **Export anytime.** Your data isn't locked in — pull it out as JSON or CSV whenever you want.
 
