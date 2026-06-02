@@ -1,0 +1,77 @@
+[
+  {
+    "name": "Push-Ups",
+    "category": "strength",
+    "mode": "reps",
+    "activeDur": 0,
+    "restDur": 30,
+    "targetCycles": 4,
+    "repsPerSet": 12,
+    "weekdays": ["Mon", "Wed", "Fri"],
+    "weeklyTarget": 3,
+    "locations": ["home", "gym"],
+    "notes": "Keep core tight, full range of motion"
+  },
+  {
+    "name": "EMS Core Iso-Hold",
+    "category": "ems",
+    "mode": "time",
+    "activeDur": 10,
+    "restDur": 10,
+    "targetCycles": 15,
+    "weekdays": ["Tue", "Thu"],
+    "weeklyTarget": 2,
+    "locations": ["home"],
+    "notes": "Draw belly button inward during stimulation"
+  },
+  {
+    "name": "Hip Mobility Flow",
+    "category": "mobility",
+    "mode": "time",
+    "activeDur": 30,
+    "restDur": 15,
+    "targetCycles": 3,
+    "weekdays": ["Sun"],
+    "weeklyTarget": 1,
+    "locations": ["home"],
+    "notes": "Slow controlled circles, both directions"
+  },
+  {
+    "name": "Dead Hang",
+    "category": "strength",
+    "mode": "hold",
+    "activeDur": 0,
+    "restDur": 60,
+    "targetCycles": 3,
+    "weekdays": ["Tue", "Sat"],
+    "weeklyTarget": 2,
+    "locations": ["home", "gym"],
+    "notes": "Hang as long as you can — best hold is recorded"
+  },
+  {
+    "name": "Lat Pulldown",
+    "category": "strength",
+    "mode": "reps",
+    "activeDur": 0,
+    "restDur": 60,
+    "targetCycles": 4,
+    "repsPerSet": 10,
+    "weekdays": ["Tue", "Fri"],
+    "weeklyTarget": 2,
+    "locations": ["gym"],
+    "notes": "Cable machine — full stretch at top"
+  },
+  {
+    "name": "Leg Press",
+    "category": "strength",
+    "mode": "reps",
+    "activeDur": 0,
+    "restDur": 75,
+    "targetCycles": 4,
+    "repsPerSet": 10,
+    "weekdays": ["Mon", "Thu"],
+    "weeklyTarget": 2,
+    "locations": ["gym"],
+    "notes": "Feet shoulder-width, don't lock knees at top"
+  }
+]

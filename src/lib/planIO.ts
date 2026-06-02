@@ -1,15 +1,16 @@
-import { PhysioExercise, ExerciseCategory, ExerciseMode } from '../types';
+import { PhysioExercise, ExerciseCategory, ExerciseMode, ExerciseLocation } from '../types';
 
 export type ImportedExercise = Omit<PhysioExercise, 'id'>;
 
 const VALID_CATEGORIES: ExerciseCategory[] = ['ems', 'strength', 'cardio', 'mobility', 'other'];
 const VALID_MODES: ExerciseMode[] = ['time', 'reps', 'hold'];
 const VALID_WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const VALID_LOCATIONS: ExerciseLocation[] = ['home', 'gym'];
 
 const CSV_COLUMNS = [
   'name', 'category', 'mode',
   'activeDur', 'restDur', 'targetCycles', 'repsPerSet',
-  'weekdays', 'weeklyTarget', 'notes',
+  'weekdays', 'weeklyTarget', 'locations', 'notes',
 ] as const;
 
 function clampInt(v: unknown, min: number, max: number, fallback: number): number {
@@ -27,6 +28,17 @@ function normalizeWeekdays(raw: unknown): string[] | undefined {
     .map(d => String(d).trim())
     .map(d => d.charAt(0).toUpperCase() + d.slice(1, 3).toLowerCase())
     .filter(d => VALID_WEEKDAYS.includes(d));
+  return cleaned.length > 0 ? Array.from(new Set(cleaned)) : undefined;
+}
+
+function normalizeLocations(raw: unknown): ExerciseLocation[] | undefined {
+  if (!raw) return undefined;
+  const list = Array.isArray(raw)
+    ? raw
+    : String(raw).split(/[|,]/);
+  const cleaned = list
+    .map(l => String(l).trim().toLowerCase())
+    .filter((l): l is ExerciseLocation => (VALID_LOCATIONS as string[]).includes(l));
   return cleaned.length > 0 ? Array.from(new Set(cleaned)) : undefined;
 }
 
@@ -56,6 +68,8 @@ function normalizeOne(raw: any): ImportedExercise | null {
   if (raw?.weeklyTarget !== undefined && raw?.weeklyTarget !== '') {
     ex.weeklyTarget = clampInt(raw.weeklyTarget, 1, 7, 3);
   }
+  const locs = normalizeLocations(raw?.locations);
+  if (locs) ex.locations = locs;
   const notes = typeof raw?.notes === 'string' ? raw.notes.trim() : '';
   if (notes) ex.notes = notes;
 
@@ -141,7 +155,7 @@ export function exportCSV(exercises: PhysioExercise[]): string {
     const cells = CSV_COLUMNS.map(col => {
       const v = (ex as any)[col];
       if (v === undefined || v === null) return '';
-      if (col === 'weekdays' && Array.isArray(v)) return v.join('|');
+      if ((col === 'weekdays' || col === 'locations') && Array.isArray(v)) return v.join('|');
       return csvEscape(String(v));
     });
     lines.push(cells.join(','));
@@ -160,6 +174,7 @@ export const TEMPLATE_JSON = `[
     "repsPerSet": 12,
     "weekdays": ["Mon", "Wed", "Fri"],
     "weeklyTarget": 3,
+    "locations": ["home", "gym"],
     "notes": "Keep core tight, full range of motion"
   },
   {
@@ -171,15 +186,30 @@ export const TEMPLATE_JSON = `[
     "targetCycles": 15,
     "weekdays": ["Tue", "Thu"],
     "weeklyTarget": 2,
+    "locations": ["home"],
     "notes": "Draw belly button inward during stimulation"
+  },
+  {
+    "name": "Lat Pulldown",
+    "category": "strength",
+    "mode": "reps",
+    "activeDur": 0,
+    "restDur": 60,
+    "targetCycles": 4,
+    "repsPerSet": 10,
+    "weekdays": ["Tue", "Fri"],
+    "weeklyTarget": 2,
+    "locations": ["gym"],
+    "notes": "Cable machine — full stretch at top"
   }
 ]
 `;
 
-export const TEMPLATE_CSV = `name,category,mode,activeDur,restDur,targetCycles,repsPerSet,weekdays,weeklyTarget,notes
-Push-Ups,strength,reps,0,30,4,12,Mon|Wed|Fri,3,"Keep core tight, full range of motion"
-EMS Core Iso-Hold,ems,time,10,10,15,,Tue|Thu,2,Draw belly button inward during stimulation
-Hip Mobility Flow,mobility,time,30,15,3,,Sun,1,Slow controlled circles
+export const TEMPLATE_CSV = `name,category,mode,activeDur,restDur,targetCycles,repsPerSet,weekdays,weeklyTarget,locations,notes
+Push-Ups,strength,reps,0,30,4,12,Mon|Wed|Fri,3,home|gym,"Keep core tight, full range of motion"
+EMS Core Iso-Hold,ems,time,10,10,15,,Tue|Thu,2,home,Draw belly button inward during stimulation
+Lat Pulldown,strength,reps,0,60,4,10,Tue|Fri,2,gym,Cable machine — full stretch at top
+Hip Mobility Flow,mobility,time,30,15,3,,Sun,1,,Slow controlled circles
 `;
 
 export function downloadFile(filename: string, content: string, mime: string) {

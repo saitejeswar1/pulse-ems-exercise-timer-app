@@ -27,6 +27,7 @@ export interface WorkoutState {
 
 export type ExerciseMode = 'time' | 'reps' | 'hold';
 export type ExerciseCategory = 'ems' | 'strength' | 'cardio' | 'mobility' | 'other';
+export type ExerciseLocation = 'home' | 'gym';
 
 export interface PhysioExercise {
   id: string;
@@ -39,6 +40,7 @@ export interface PhysioExercise {
   repsPerSet?: number;  // used when mode='reps' (also informational for time mode)
   weekdays?: string[]; // e.g. ['Mon', 'Wed', 'Fri'] for Day-wise scheduling
   weeklyTarget?: number; // e.g. 3 times per week
+  locations?: ExerciseLocation[]; // where this can be performed; omitted = unspecified
   notes?: string;
 }
 

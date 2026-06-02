@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
-import { PhysioExercise, ExerciseMode, ExerciseCategory } from '../types';
-import { Plus, Trash2, Play, Dumbbell, Sparkles, AlertCircle, Calendar, Pencil, X, Timer, Repeat, Zap, HeartPulse, Move, Tag, Upload, Download, FileText, ChevronUp, ChevronDown, Hourglass } from 'lucide-react';
+import { PhysioExercise, ExerciseMode, ExerciseCategory, ExerciseLocation } from '../types';
+import { Plus, Trash2, Play, Dumbbell, Sparkles, AlertCircle, Calendar, Pencil, X, Timer, Repeat, Zap, HeartPulse, Move, Tag, Upload, Download, FileText, ChevronUp, ChevronDown, Hourglass, Copy, Check, Home, Building2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   parseJSONPlan, parseCSVPlan, exportJSON, exportCSV,
@@ -35,6 +35,11 @@ const CATEGORY_STYLES: Record<ExerciseCategory, string> = {
   mobility: 'bg-sky-100 text-sky-700',
   other: 'bg-slate-100 text-slate-600',
 };
+
+const LOCATIONS: { value: ExerciseLocation; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
+  { value: 'home', label: 'Home', icon: Home },
+  { value: 'gym', label: 'Gym', icon: Building2 },
+];
 
 const PRESEEDS: Omit<PhysioExercise, 'id'>[] = [
   {
@@ -84,6 +89,7 @@ const EMPTY_FORM = {
   repsPerSet: 10,
   selectedDays: ['Mon', 'Wed', 'Fri'] as string[],
   weeklyTarget: 3,
+  selectedLocations: [] as ExerciseLocation[],
   notes: '',
 };
 
@@ -101,6 +107,8 @@ export default function PhysioSchedule({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showIO, setShowIO] = useState(false);
   const [importStatus, setImportStatus] = useState<{ kind: 'ok' | 'err'; msg: string } | null>(null);
+  const [templatePreview, setTemplatePreview] = useState<'json' | 'csv' | null>(null);
+  const [copied, setCopied] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Form states
@@ -109,12 +117,14 @@ export default function PhysioSchedule({
   const [mode, setMode] = useState<ExerciseMode>(EMPTY_FORM.mode);
   const [filterCategory, setFilterCategory] = useState<ExerciseCategory | 'all'>('all');
   const [filterDay, setFilterDay] = useState<string | 'all'>('all');
+  const [filterLocation, setFilterLocation] = useState<ExerciseLocation | 'all'>('all');
   const [activeDur, setActiveDur] = useState(EMPTY_FORM.activeDur);
   const [restDur, setRestDur] = useState(EMPTY_FORM.restDur);
   const [targetCycles, setTargetCycles] = useState(EMPTY_FORM.targetCycles);
   const [repsPerSet, setRepsPerSet] = useState(EMPTY_FORM.repsPerSet);
   const [selectedDays, setSelectedDays] = useState<string[]>(EMPTY_FORM.selectedDays);
   const [weeklyTarget, setWeeklyTarget] = useState(EMPTY_FORM.weeklyTarget);
+  const [selectedLocations, setSelectedLocations] = useState<ExerciseLocation[]>(EMPTY_FORM.selectedLocations);
   const [notes, setNotes] = useState(EMPTY_FORM.notes);
 
   const resetForm = () => {
@@ -127,6 +137,7 @@ export default function PhysioSchedule({
     setRepsPerSet(EMPTY_FORM.repsPerSet);
     setSelectedDays(EMPTY_FORM.selectedDays);
     setWeeklyTarget(EMPTY_FORM.weeklyTarget);
+    setSelectedLocations(EMPTY_FORM.selectedLocations);
     setNotes(EMPTY_FORM.notes);
     setEditingId(null);
   };
@@ -142,6 +153,7 @@ export default function PhysioSchedule({
     setRepsPerSet(ex.repsPerSet ?? 10);
     setSelectedDays(ex.weekdays ?? []);
     setWeeklyTarget(ex.weeklyTarget ?? 3);
+    setSelectedLocations(ex.locations ?? []);
     setNotes(ex.notes ?? '');
     setShowForm(true);
   };
@@ -162,6 +174,12 @@ export default function PhysioSchedule({
     );
   };
 
+  const handleLocationToggle = (loc: ExerciseLocation) => {
+    setSelectedLocations(prev =>
+      prev.includes(loc) ? prev.filter(l => l !== loc) : [...prev, loc]
+    );
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
@@ -175,6 +193,7 @@ export default function PhysioSchedule({
       repsPerSet,
       weekdays: selectedDays.length > 0 ? selectedDays : undefined,
       weeklyTarget,
+      locations: selectedLocations.length > 0 ? selectedLocations : undefined,
       notes: notes.trim() || undefined,
     };
     if (editingId) {
@@ -225,11 +244,20 @@ export default function PhysioSchedule({
     }
   };
 
-  const handleDownloadTemplate = (fmt: 'json' | 'csv') => {
-    if (fmt === 'json') {
-      downloadFile('pulse-plan-template.json', TEMPLATE_JSON, 'application/json');
-    } else {
-      downloadFile('pulse-plan-template.csv', TEMPLATE_CSV, 'text/csv');
+  const handleTogglePreview = (fmt: 'json' | 'csv') => {
+    setCopied(false);
+    setTemplatePreview(prev => (prev === fmt ? null : fmt));
+  };
+
+  const handleCopyTemplate = async () => {
+    if (!templatePreview) return;
+    const text = templatePreview === 'json' ? TEMPLATE_JSON : TEMPLATE_CSV;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard API unavailable — user can still select the text manually.
     }
   };
 
@@ -401,22 +429,66 @@ export default function PhysioSchedule({
 
             <div className="grid grid-cols-2 gap-2">
               <button
-                onClick={() => handleDownloadTemplate('json')}
-                className="py-1.5 text-[10px] font-bold uppercase tracking-wide text-natural-terracotta hover:text-[#C27A62] cursor-pointer flex items-center justify-center gap-1"
+                onClick={() => handleTogglePreview('json')}
+                aria-expanded={templatePreview === 'json'}
+                className={`py-1.5 text-[10px] font-bold uppercase tracking-wide cursor-pointer flex items-center justify-center gap-1 rounded-lg ${
+                  templatePreview === 'json'
+                    ? 'bg-natural-terracotta/10 text-natural-terracotta'
+                    : 'text-natural-terracotta hover:text-[#C27A62]'
+                }`}
               >
-                <FileText className="w-3 h-3" /> JSON Template
+                <FileText className="w-3 h-3" /> JSON Example
+                {templatePreview === 'json' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
               </button>
               <button
-                onClick={() => handleDownloadTemplate('csv')}
-                className="py-1.5 text-[10px] font-bold uppercase tracking-wide text-natural-terracotta hover:text-[#C27A62] cursor-pointer flex items-center justify-center gap-1"
+                onClick={() => handleTogglePreview('csv')}
+                aria-expanded={templatePreview === 'csv'}
+                className={`py-1.5 text-[10px] font-bold uppercase tracking-wide cursor-pointer flex items-center justify-center gap-1 rounded-lg ${
+                  templatePreview === 'csv'
+                    ? 'bg-natural-terracotta/10 text-natural-terracotta'
+                    : 'text-natural-terracotta hover:text-[#C27A62]'
+                }`}
               >
-                <FileText className="w-3 h-3" /> CSV Template
+                <FileText className="w-3 h-3" /> CSV Example
+                {templatePreview === 'csv' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
               </button>
             </div>
 
-            <p className="text-[10px] text-[#8B8B80] leading-relaxed">
-              Download a template to see the expected structure. In CSV files, weekdays are pipe-separated (e.g. <code className="font-mono">Mon|Wed|Fri</code>).
-            </p>
+            <AnimatePresence initial={false}>
+              {templatePreview && (
+                <motion.div
+                  key={templatePreview}
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.18 }}
+                  className="overflow-hidden"
+                >
+                  <div className="rounded-xl border border-natural-border bg-natural-bg/60 p-2.5 flex flex-col gap-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-natural-moss">
+                        {templatePreview === 'json' ? 'JSON structure' : 'CSV structure'}
+                      </span>
+                      <button
+                        onClick={handleCopyTemplate}
+                        className="text-[10px] font-bold uppercase tracking-wide text-natural-terracotta hover:text-[#C27A62] cursor-pointer flex items-center gap-1"
+                      >
+                        {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                        {copied ? 'Copied' : 'Copy'}
+                      </button>
+                    </div>
+                    <pre className="text-[10px] leading-snug font-mono text-natural-dark/90 whitespace-pre overflow-auto max-h-56 m-0">
+{templatePreview === 'json' ? TEMPLATE_JSON : TEMPLATE_CSV}
+                    </pre>
+                    <p className="text-[10px] text-[#8B8B80] leading-relaxed">
+                      {templatePreview === 'json'
+                        ? <>Top-level must be an array (or <code className="font-mono">{`{ "exercises": [...] }`}</code>). Unknown fields are ignored.</>
+                        : <>First row is the header. Weekdays are pipe-separated (e.g. <code className="font-mono">Mon|Wed|Fri</code>). Wrap fields containing commas in quotes.</>}
+                    </p>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
             {importStatus && (
               <div
@@ -617,6 +689,34 @@ export default function PhysioSchedule({
               </div>
             </div>
 
+            {/* Location toggles */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-bold text-natural-moss">Where (optional)</label>
+              <div className="grid grid-cols-2 gap-1.5">
+                {LOCATIONS.map(({ value, label, icon: Icon }) => {
+                  const isSelected = selectedLocations.includes(value);
+                  return (
+                    <button
+                      type="button"
+                      key={value}
+                      onClick={() => handleLocationToggle(value)}
+                      className={`flex items-center justify-center gap-1.5 py-2 rounded-lg border text-[10px] font-bold uppercase tracking-wide transition cursor-pointer ${
+                        isSelected
+                          ? 'bg-natural-moss/10 text-natural-moss border-natural-moss'
+                          : 'bg-natural-bg border-natural-border text-[#757570]'
+                      }`}
+                    >
+                      <Icon className="w-3.5 h-3.5" />
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="text-[10px] text-[#8B8B80] italic">
+                Pick one, both, or leave empty if location doesn't matter.
+              </p>
+            </div>
+
             {/* Weekly Goal target frequency */}
             <div className="flex flex-col gap-1.5">
               <div className="flex justify-between text-xs font-bold text-natural-moss">
@@ -708,6 +808,32 @@ export default function PhysioSchedule({
               </button>
             ))}
           </div>
+          <div className="flex flex-wrap gap-1.5">
+            <button
+              onClick={() => setFilterLocation('all')}
+              className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide border transition cursor-pointer ${
+                filterLocation === 'all'
+                  ? 'bg-natural-dark text-white border-natural-dark'
+                  : 'bg-natural-bg text-[#757570] border-natural-border'
+              }`}
+            >
+              Anywhere
+            </button>
+            {LOCATIONS.map(({ value, label, icon: Icon }) => (
+              <button
+                key={value}
+                onClick={() => setFilterLocation(value)}
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide border transition cursor-pointer ${
+                  filterLocation === value
+                    ? 'bg-natural-moss text-white border-natural-moss'
+                    : 'bg-natural-bg text-[#757570] border-natural-border'
+                }`}
+              >
+                <Icon className="w-3 h-3" />
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
@@ -751,7 +877,8 @@ export default function PhysioSchedule({
             const visible = exercises.filter(e => {
               const catOk = filterCategory === 'all' || (e.category ?? 'other') === filterCategory;
               const dayOk = filterDay === 'all' || (e.weekdays?.includes(filterDay) ?? false);
-              return catOk && dayOk;
+              const locOk = filterLocation === 'all' || (e.locations?.includes(filterLocation) ?? false);
+              return catOk && dayOk && locOk;
             });
             if (visible.length === 0) {
               return (
@@ -786,6 +913,15 @@ export default function PhysioSchedule({
                         <CatIcon className="w-3 h-3" />
                         {catMeta?.label ?? 'Other'}
                       </span>
+                      {item.locations && item.locations.length > 0 && (
+                        <span className="inline-flex items-center gap-1 text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-natural-bg text-natural-moss border border-natural-border">
+                          {LOCATIONS.filter(l => item.locations?.includes(l.value)).map(l => {
+                            const Icon = l.icon;
+                            return <Icon key={l.value} className="w-3 h-3" />;
+                          })}
+                          {item.locations.map(l => l === 'home' ? 'Home' : 'Gym').join(' · ')}
+                        </span>
+                      )}
                       <h4 className="font-bold text-natural-dark text-sm leading-tight truncate">{item.name}</h4>
                     </div>
 
