@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { PhysioExercise, ExerciseMode, ExerciseCategory, ExerciseLocation } from '../types';
-import { Plus, Trash2, Play, Dumbbell, Sparkles, AlertCircle, Calendar, Pencil, X, Timer, Repeat, Zap, HeartPulse, Move, Tag, Upload, Download, FileText, ChevronUp, ChevronDown, Hourglass, Copy, Check, Home, Building2 } from 'lucide-react';
+import { Plus, Trash2, Play, Dumbbell, Sparkles, AlertCircle, Calendar, Pencil, X, Timer, Repeat, Zap, HeartPulse, Move, Tag, Upload, Download, FileText, ChevronUp, ChevronDown, Hourglass, Copy, Check, Home, Building2, Target, ChevronRight } from 'lucide-react';
+import { gateForLevel } from '../lib/progression';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   parseJSONPlan, parseCSVPlan, exportJSON, exportCSV,
@@ -10,6 +11,10 @@ import {
 interface PhysioScheduleProps {
   exercises: PhysioExercise[];
   activeExerciseId: string | null;
+  currentLevel?: number | null;
+  onChangeCurrentLevel?: (level: number | null) => void;
+  progressionState?: Record<string, { checked: boolean; checkedAt: string | null }>;
+  onOpenProgression?: () => void;
   onAddExercise: (ex: Omit<PhysioExercise, 'id'>) => void;
   onUpdateExercise: (id: string, ex: Omit<PhysioExercise, 'id'>) => void;
   onRemoveExercise: (id: string) => void;
@@ -90,12 +95,18 @@ const EMPTY_FORM = {
   selectedDays: ['Mon', 'Wed', 'Fri'] as string[],
   weeklyTarget: 3,
   selectedLocations: [] as ExerciseLocation[],
+  level: null as number | null,
+  defaultWeightKg: '',
   notes: '',
 };
 
 export default function PhysioSchedule({
   exercises,
   activeExerciseId,
+  currentLevel = null,
+  onChangeCurrentLevel,
+  progressionState,
+  onOpenProgression,
   onAddExercise,
   onUpdateExercise,
   onRemoveExercise,
@@ -125,6 +136,8 @@ export default function PhysioSchedule({
   const [selectedDays, setSelectedDays] = useState<string[]>(EMPTY_FORM.selectedDays);
   const [weeklyTarget, setWeeklyTarget] = useState(EMPTY_FORM.weeklyTarget);
   const [selectedLocations, setSelectedLocations] = useState<ExerciseLocation[]>(EMPTY_FORM.selectedLocations);
+  const [formLevel, setFormLevel] = useState<number | null>(EMPTY_FORM.level);
+  const [formWeight, setFormWeight] = useState<string>(EMPTY_FORM.defaultWeightKg);
   const [notes, setNotes] = useState(EMPTY_FORM.notes);
 
   const resetForm = () => {
@@ -138,6 +151,8 @@ export default function PhysioSchedule({
     setSelectedDays(EMPTY_FORM.selectedDays);
     setWeeklyTarget(EMPTY_FORM.weeklyTarget);
     setSelectedLocations(EMPTY_FORM.selectedLocations);
+    setFormLevel(EMPTY_FORM.level);
+    setFormWeight(EMPTY_FORM.defaultWeightKg);
     setNotes(EMPTY_FORM.notes);
     setEditingId(null);
   };
@@ -154,6 +169,8 @@ export default function PhysioSchedule({
     setSelectedDays(ex.weekdays ?? []);
     setWeeklyTarget(ex.weeklyTarget ?? 3);
     setSelectedLocations(ex.locations ?? []);
+    setFormLevel(typeof ex.level === 'number' ? ex.level : null);
+    setFormWeight(typeof ex.defaultWeightKg === 'number' ? String(ex.defaultWeightKg) : '');
     setNotes(ex.notes ?? '');
     setShowForm(true);
   };
@@ -194,6 +211,11 @@ export default function PhysioSchedule({
       weekdays: selectedDays.length > 0 ? selectedDays : undefined,
       weeklyTarget,
       locations: selectedLocations.length > 0 ? selectedLocations : undefined,
+      level: formLevel ?? undefined,
+      defaultWeightKg: (() => {
+        const w = parseFloat(formWeight);
+        return Number.isFinite(w) && w > 0 ? Math.min(500, Math.round(w * 4) / 4) : undefined;
+      })(),
       notes: notes.trim() || undefined,
     };
     if (editingId) {
@@ -352,6 +374,48 @@ export default function PhysioSchedule({
           </div>
         )}
       </div>
+
+      {/* Progression tile — opens the Progression checklist sheet */}
+      {onOpenProgression && (() => {
+        const gate = currentLevel != null ? gateForLevel(currentLevel) : undefined;
+        const isTerminal = currentLevel === 9;
+        const total = gate?.criteria.length ?? 0;
+        const checked = gate ? gate.criteria.filter(c => progressionState?.[c.id]?.checked).length : 0;
+        return (
+          <button
+            onClick={onOpenProgression}
+            className="w-full text-left p-4 bg-white rounded-2xl border border-natural-border shadow-sm flex items-center gap-3 hover:bg-natural-bg/40 transition cursor-pointer"
+          >
+            <div className="p-2 rounded-lg bg-natural-terracotta/10 text-natural-terracotta">
+              <Target className="w-4 h-4" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-xs font-bold uppercase tracking-wider text-natural-moss">Progression</div>
+              {currentLevel == null ? (
+                <div className="text-[11px] text-[#70706B] mt-0.5">Set a Focus Level to track criteria</div>
+              ) : isTerminal ? (
+                <div className="text-[11px] text-natural-moss font-bold mt-0.5">Level 9 — return-to-sport</div>
+              ) : gate ? (
+                <>
+                  <div className="text-[12px] text-natural-dark font-semibold mt-0.5">
+                    Level {currentLevel} → Level {gate.toLevel}
+                  </div>
+                  <div className="mt-1.5 w-full h-1 bg-natural-bg rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-natural-terracotta"
+                      style={{ width: `${total === 0 ? 0 : (checked / total) * 100}%` }}
+                    />
+                  </div>
+                  <div className="text-[10px] font-mono text-[#70706B] mt-1">{checked} / {total} criteria</div>
+                </>
+              ) : (
+                <div className="text-[11px] text-[#70706B] mt-0.5">No gate defined for L{currentLevel}</div>
+              )}
+            </div>
+            <ChevronRight className="w-4 h-4 text-[#8B8B80] flex-shrink-0" />
+          </button>
+        );
+      })()}
 
       {/* Exercises List Header & Actions */}
       <div className="flex justify-between items-center mt-2 gap-2">
@@ -689,6 +753,70 @@ export default function PhysioSchedule({
               </div>
             </div>
 
+            {/* Level (optional) */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-bold text-natural-moss">Recovery Level (optional)</label>
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setFormLevel(null)}
+                  className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide border transition cursor-pointer ${
+                    formLevel == null
+                      ? 'bg-natural-dark text-white border-natural-dark'
+                      : 'bg-natural-bg text-[#757570] border-natural-border'
+                  }`}
+                >
+                  None
+                </button>
+                {[1,2,3,4,5,6,7,8,9].map(lvl => (
+                  <button
+                    type="button"
+                    key={lvl}
+                    onClick={() => setFormLevel(lvl)}
+                    className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide border transition cursor-pointer ${
+                      formLevel === lvl
+                        ? 'bg-natural-terracotta text-white border-natural-terracotta'
+                        : 'bg-natural-bg text-[#757570] border-natural-border'
+                    }`}
+                  >
+                    L{lvl}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Load (optional) */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-bold text-natural-moss">Load (optional, kg)</label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  min={0}
+                  max={500}
+                  step={0.25}
+                  placeholder="0 = bodyweight"
+                  value={formWeight}
+                  onChange={e => setFormWeight(e.target.value)}
+                  className="flex-1 px-3 py-2 text-sm bg-natural-bg border border-natural-border rounded-xl text-natural-dark font-mono focus:outline-none focus:border-natural-moss"
+                />
+                <button
+                  type="button"
+                  onClick={() => setFormWeight('')}
+                  className={`px-3 py-2 rounded-xl text-[10px] font-bold uppercase tracking-wide border cursor-pointer ${
+                    formWeight === ''
+                      ? 'bg-natural-moss/10 text-natural-moss border-natural-moss'
+                      : 'bg-natural-bg text-[#757570] border-natural-border'
+                  }`}
+                >
+                  Bodyweight
+                </button>
+              </div>
+              <p className="text-[10px] text-[#8B8B80] italic">
+                Last weight used. Updated each time you change it on the timer.
+              </p>
+            </div>
+
             {/* Location toggles */}
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-bold text-natural-moss">Where (optional)</label>
@@ -754,9 +882,41 @@ export default function PhysioSchedule({
         )}
       </AnimatePresence>
 
-      {/* Category + Day Filter Chips */}
-      {exercises.length > 0 && (
+      {/* Filter Chips: Level (focus) → Category → Day → Location */}
+      {exercises.length > 0 && (() => {
+        const availableLevels = Array.from(
+          new Set(exercises.map(e => e.level).filter((l): l is number => typeof l === 'number'))
+        ).sort((a, b) => a - b);
+        return (
         <div className="flex flex-col gap-1.5">
+          {availableLevels.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-[#8B8B80] mr-1">Focus</span>
+              <button
+                onClick={() => onChangeCurrentLevel?.(null)}
+                className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide border transition cursor-pointer ${
+                  currentLevel == null
+                    ? 'bg-natural-dark text-white border-natural-dark'
+                    : 'bg-natural-bg text-[#757570] border-natural-border'
+                }`}
+              >
+                All Levels
+              </button>
+              {availableLevels.map(lvl => (
+                <button
+                  key={lvl}
+                  onClick={() => onChangeCurrentLevel?.(lvl)}
+                  className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide border transition cursor-pointer ${
+                    currentLevel === lvl
+                      ? 'bg-natural-terracotta text-white border-natural-terracotta'
+                      : 'bg-natural-bg text-[#757570] border-natural-border'
+                  }`}
+                >
+                  L{lvl}
+                </button>
+              ))}
+            </div>
+          )}
           <div className="flex flex-wrap gap-1.5">
             <button
               onClick={() => setFilterCategory('all')}
@@ -835,7 +995,8 @@ export default function PhysioSchedule({
             ))}
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* Routine list */}
       <div className="flex flex-col gap-3">
@@ -878,7 +1039,8 @@ export default function PhysioSchedule({
               const catOk = filterCategory === 'all' || (e.category ?? 'other') === filterCategory;
               const dayOk = filterDay === 'all' || (e.weekdays?.includes(filterDay) ?? false);
               const locOk = filterLocation === 'all' || (e.locations?.includes(filterLocation) ?? false);
-              return catOk && dayOk && locOk;
+              const lvlOk = currentLevel == null || e.level === currentLevel;
+              return catOk && dayOk && locOk && lvlOk;
             });
             if (visible.length === 0) {
               return (
@@ -913,6 +1075,11 @@ export default function PhysioSchedule({
                         <CatIcon className="w-3 h-3" />
                         {catMeta?.label ?? 'Other'}
                       </span>
+                      {typeof item.level === 'number' && (
+                        <span className="inline-flex items-center text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-natural-terracotta/10 text-natural-terracotta border border-natural-terracotta/30">
+                          L{item.level}
+                        </span>
+                      )}
                       {item.locations && item.locations.length > 0 && (
                         <span className="inline-flex items-center gap-1 text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-natural-bg text-natural-moss border border-natural-border">
                           {LOCATIONS.filter(l => item.locations?.includes(l.value)).map(l => {
@@ -942,6 +1109,11 @@ export default function PhysioSchedule({
                       <span>Sets: {item.targetCycles}</span>
                       {item.repsPerSet && (
                         <span>Reps: {item.repsPerSet}</span>
+                      )}
+                      {typeof item.defaultWeightKg === 'number' && item.defaultWeightKg > 0 && (
+                        <span className="px-1.5 py-0.5 rounded bg-natural-moss/10 text-natural-moss text-[10px]">
+                          {item.defaultWeightKg} kg
+                        </span>
                       )}
                     </div>
 

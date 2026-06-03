@@ -1,12 +1,14 @@
 import { useState, useEffect, useRef } from 'react';
-import { Play, Pause, RotateCcw, Clock, Dumbbell, TrendingUp, Settings as SettingsIcon, Check, PlusCircle, CheckCircle2, CalendarCheck, SkipForward, X, Hourglass, Square } from 'lucide-react';
-import { WorkoutSettings, WorkoutPhase, PhysioExercise, WorkoutLogEntry, ExerciseMode } from './types';
+import { Play, Pause, RotateCcw, Clock, Dumbbell, TrendingUp, Settings as SettingsIcon, Check, PlusCircle, CheckCircle2, CalendarCheck, SkipForward, X, Hourglass, Square, Pencil } from 'lucide-react';
+import { WorkoutSettings, WorkoutPhase, PhysioExercise, WorkoutLogEntry, ExerciseMode, SessionCheckIn } from './types';
 import { audio } from './lib/audio';
 import { App as CapacitorApp } from '@capacitor/app';
 import SettingsPanel from './components/SettingsPanel';
 import Waveform from './components/Waveform';
 import PhysioSchedule from './components/PhysioSchedule';
 import AnalyticsPanel from './components/AnalyticsPanel';
+import PostSessionCheckIn from './components/PostSessionCheckIn';
+import ProgressionSheet, { ProgressionState } from './components/ProgressionSheet';
 import { motion, AnimatePresence } from 'motion/react';
 
 const DEFAULTS: WorkoutSettings = {
@@ -22,6 +24,7 @@ const DEFAULTS: WorkoutSettings = {
   wakelock: true,
   aiInsightsEnabled: false,
   aiInsightsAutoDay: 0, // Sunday — weekly reflection day
+  currentLevel: null,
 };
 
 const WEEKDAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -122,6 +125,26 @@ export default function App() {
     return [];
   });
 
+  // Recovery check-ins (pain / swelling / flexion) — keyed by date, separate from workout logs
+  const [checkIns, setCheckIns] = useState<SessionCheckIn[]>(() => {
+    try {
+      const saved = localStorage.getItem('pulse-checkins');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {}
+    return [];
+  });
+  const [showCheckIn, setShowCheckIn] = useState(false);
+
+  // Per-criterion progression tick state — keyed by criterion id
+  const [progression, setProgression] = useState<ProgressionState>(() => {
+    try {
+      const saved = localStorage.getItem('pulse-progression');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {}
+    return {};
+  });
+  const [showProgression, setShowProgression] = useState(false);
+
   // Timer precise continuous float trackers (seconds)
   const [remainingSec, setRemainingSec] = useState<number>(settings.activeDur);
   const [progressPercent, setProgressPercent] = useState<number>(0);
@@ -168,6 +191,56 @@ export default function App() {
       localStorage.setItem('pulse-logs', JSON.stringify(logs));
     } catch (e) {}
   }, [logs]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('pulse-checkins', JSON.stringify(checkIns));
+    } catch (e) {}
+  }, [checkIns]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('pulse-progression', JSON.stringify(progression));
+    } catch (e) {}
+  }, [progression]);
+
+  const handleToggleProgression = (criterionId: string) => {
+    setProgression(prev => {
+      const wasChecked = !!prev[criterionId]?.checked;
+      return {
+        ...prev,
+        [criterionId]: {
+          checked: !wasChecked,
+          checkedAt: !wasChecked ? new Date().toISOString() : null,
+        },
+      };
+    });
+  };
+
+  const handleAdvanceLevel = (toLevel: number) => {
+    handleSettingsChange({ ...settings, currentLevel: toLevel });
+    setShowProgression(false);
+  };
+
+  const todayDateString = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+
+  const hasCheckInToday = () => {
+    const today = todayDateString();
+    return checkIns.some(c => c.date === today);
+  };
+
+  const handleSaveCheckIn = (payload: Omit<SessionCheckIn, 'id' | 'timestamp' | 'date'>) => {
+    const entry: SessionCheckIn = {
+      id: `chk-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      timestamp: Date.now(),
+      date: todayDateString(),
+      ...payload,
+    };
+    setCheckIns(prev => [...prev, entry]);
+  };
 
   // --------- Volume and Theme update ---------
   useEffect(() => {
@@ -266,6 +339,8 @@ export default function App() {
       : cyclesVal * settings.activeDur;
     // Reset hold tracker for the next exercise / next workout
     holdSecondsRef.current = [];
+    const weightKg = exerciseObj?.defaultWeightKg;
+    const repsPerSetUsed = exerciseObj?.repsPerSet;
     const newEntry: WorkoutLogEntry = {
       id: `log-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
       timestamp: Date.now(),
@@ -276,6 +351,8 @@ export default function App() {
       cyclesCompleted: cyclesVal,
       totalActiveSeconds,
       bestHoldSeconds,
+      weightKg: typeof weightKg === 'number' && weightKg > 0 ? weightKg : undefined,
+      repsPerSetUsed,
     };
     setLogs(prev => [...prev, newEntry]);
   };
@@ -382,6 +459,9 @@ export default function App() {
             triggerVibe([100, 60, 100, 60, 200]);
             setProgressPercent(100);
             releaseWakeLockState();
+            if (!hasCheckInToday()) {
+              setShowCheckIn(true);
+            }
             return;
           }
 
@@ -661,6 +741,26 @@ export default function App() {
     handleReset();
   };
 
+  // Quick edit of an exercise's load. Tapping the Weight pill prompts for a new kg value;
+  // empty / 0 means bodyweight. Persists to defaultWeightKg so next session prefills.
+  const handleEditWeight = (id: string) => {
+    const ex = exercises.find(e => e.id === id);
+    if (!ex) return;
+    const current = typeof ex.defaultWeightKg === 'number' ? String(ex.defaultWeightKg) : '';
+    const input = window.prompt(
+      `Weight for "${ex.name}" in kg.\nLeave empty or enter 0 for bodyweight.`,
+      current
+    );
+    if (input === null) return; // user cancelled
+    const trimmed = input.trim();
+    const parsed = parseFloat(trimmed);
+    const next = trimmed === '' || !Number.isFinite(parsed) || parsed <= 0
+      ? undefined
+      : Math.min(500, Math.round(parsed * 4) / 4);
+    const { id: _id, ...rest } = ex;
+    handleUpdateExercise(id, { ...rest, defaultWeightKg: next });
+  };
+
   return (
     <div className="w-full min-h-screen bg-[#F7F5F2] text-natural-dark font-sans flex flex-col items-center">
       <div className="w-full max-w-md min-h-screen flex flex-col justify-between p-4 md:p-6 pb-safe md:border-x border-natural-border bg-white shadow-md relative overflow-hidden">
@@ -816,6 +916,19 @@ export default function App() {
                         {queue.length > 1 ? 'Clear' : 'Unload'}
                       </button>
                     </div>
+                    {currentExercise && (
+                      <button
+                        onClick={() => handleEditWeight(currentExercise.id)}
+                        className="self-start flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold border border-natural-moss/30 bg-white text-natural-moss hover:bg-natural-moss/10 transition cursor-pointer"
+                        aria-label="Edit weight"
+                      >
+                        <Dumbbell className="w-3 h-3" />
+                        {typeof currentExercise.defaultWeightKg === 'number' && currentExercise.defaultWeightKg > 0
+                          ? `${currentExercise.defaultWeightKg} kg`
+                          : 'Bodyweight'}
+                        <Pencil className="w-2.5 h-2.5 opacity-60" />
+                      </button>
+                    )}
                     {queue.length > 1 && (
                       <div className="flex gap-1 overflow-x-auto">
                         {queue.map((qid, i) => {
@@ -1066,6 +1179,10 @@ export default function App() {
                 <PhysioSchedule
                   exercises={exercises}
                   activeExerciseId={activeExerciseId}
+                  currentLevel={settings.currentLevel ?? null}
+                  onChangeCurrentLevel={(lvl) => handleSettingsChange({ ...settings, currentLevel: lvl })}
+                  progressionState={progression}
+                  onOpenProgression={() => setShowProgression(true)}
                   onAddExercise={handleAddExercise}
                   onUpdateExercise={handleUpdateExercise}
                   onRemoveExercise={handleRemoveExercise}
@@ -1131,6 +1248,25 @@ export default function App() {
         </footer>
 
       </div>
+
+      <PostSessionCheckIn
+        open={showCheckIn}
+        onClose={() => setShowCheckIn(false)}
+        onSave={handleSaveCheckIn}
+      />
+
+      <ProgressionSheet
+        open={showProgression}
+        level={settings.currentLevel ?? null}
+        state={progression}
+        checkIns={checkIns}
+        logs={logs}
+        bodyweightKg={settings.bodyweightKg ?? null}
+        onClose={() => setShowProgression(false)}
+        onToggle={handleToggleProgression}
+        onAdvanceLevel={handleAdvanceLevel}
+        onOpenCheckIn={() => { setShowProgression(false); setShowCheckIn(true); }}
+      />
     </div>
   );
 }

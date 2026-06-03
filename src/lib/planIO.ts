@@ -10,7 +10,7 @@ const VALID_LOCATIONS: ExerciseLocation[] = ['home', 'gym'];
 const CSV_COLUMNS = [
   'name', 'category', 'mode',
   'activeDur', 'restDur', 'targetCycles', 'repsPerSet',
-  'weekdays', 'weeklyTarget', 'locations', 'notes',
+  'weekdays', 'weeklyTarget', 'locations', 'level', 'defaultWeightKg', 'notes',
 ] as const;
 
 function clampInt(v: unknown, min: number, max: number, fallback: number): number {
@@ -70,6 +70,15 @@ function normalizeOne(raw: any): ImportedExercise | null {
   }
   const locs = normalizeLocations(raw?.locations);
   if (locs) ex.locations = locs;
+  if (raw?.level !== undefined && raw?.level !== '') {
+    ex.level = clampInt(raw.level, 1, 9, 1);
+  }
+  if (raw?.defaultWeightKg !== undefined && raw?.defaultWeightKg !== '') {
+    const w = typeof raw.defaultWeightKg === 'number'
+      ? raw.defaultWeightKg
+      : parseFloat(String(raw.defaultWeightKg));
+    if (Number.isFinite(w) && w >= 0) ex.defaultWeightKg = Math.min(500, Math.max(0, Math.round(w * 4) / 4));
+  }
   const notes = typeof raw?.notes === 'string' ? raw.notes.trim() : '';
   if (notes) ex.notes = notes;
 
@@ -175,6 +184,7 @@ export const TEMPLATE_JSON = `[
     "weekdays": ["Mon", "Wed", "Fri"],
     "weeklyTarget": 3,
     "locations": ["home", "gym"],
+    "level": 3,
     "notes": "Keep core tight, full range of motion"
   },
   {
@@ -200,16 +210,17 @@ export const TEMPLATE_JSON = `[
     "weekdays": ["Tue", "Fri"],
     "weeklyTarget": 2,
     "locations": ["gym"],
+    "level": 4,
     "notes": "Cable machine — full stretch at top"
   }
 ]
 `;
 
-export const TEMPLATE_CSV = `name,category,mode,activeDur,restDur,targetCycles,repsPerSet,weekdays,weeklyTarget,locations,notes
-Push-Ups,strength,reps,0,30,4,12,Mon|Wed|Fri,3,home|gym,"Keep core tight, full range of motion"
-EMS Core Iso-Hold,ems,time,10,10,15,,Tue|Thu,2,home,Draw belly button inward during stimulation
-Lat Pulldown,strength,reps,0,60,4,10,Tue|Fri,2,gym,Cable machine — full stretch at top
-Hip Mobility Flow,mobility,time,30,15,3,,Sun,1,,Slow controlled circles
+export const TEMPLATE_CSV = `name,category,mode,activeDur,restDur,targetCycles,repsPerSet,weekdays,weeklyTarget,locations,level,notes
+Push-Ups,strength,reps,0,30,4,12,Mon|Wed|Fri,3,home|gym,3,"Keep core tight, full range of motion"
+EMS Core Iso-Hold,ems,time,10,10,15,,Tue|Thu,2,home,,Draw belly button inward during stimulation
+Lat Pulldown,strength,reps,0,60,4,10,Tue|Fri,2,gym,4,Cable machine — full stretch at top
+Hip Mobility Flow,mobility,time,30,15,3,,Sun,1,,,Slow controlled circles
 `;
 
 export function downloadFile(filename: string, content: string, mime: string) {

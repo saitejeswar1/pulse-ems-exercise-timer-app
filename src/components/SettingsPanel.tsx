@@ -13,6 +13,7 @@ import {
   Eye,
   Smartphone,
   Sparkles,
+  HeartPulse,
 } from 'lucide-react';
 import { motion } from 'motion/react';
 
@@ -326,7 +327,70 @@ export default function SettingsPanel({ settings, onChange, onClose }: SettingsP
         </div>
       </div>
 
-      {/* 4. AI Coach (opt-in) */}
+      {/* 4. Recovery Level Focus (optional) */}
+      <div className="p-5 bg-white rounded-2xl border border-natural-border flex flex-col gap-3 shadow-sm">
+        <h3 className="text-xs font-bold text-natural-moss tracking-wider uppercase flex items-center gap-2">
+          <HeartPulse className="w-4 h-4 text-natural-moss" />
+          Recovery Level Focus
+        </h3>
+        <p className="text-[11px] text-[#70706B] leading-relaxed">
+          When set, your Schedule filters to exercises tagged with this level. Tap a level chip on the Schedule view to change it on the fly.
+        </p>
+        <div className="flex flex-wrap gap-1.5">
+          <button
+            onClick={() => handleTimingChange('currentLevel', null)}
+            className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide border transition cursor-pointer ${
+              settings.currentLevel == null
+                ? 'bg-natural-dark text-white border-natural-dark'
+                : 'bg-natural-bg text-[#757570] border-natural-border'
+            }`}
+          >
+            No Focus
+          </button>
+          {[1,2,3,4,5,6,7,8,9].map(lvl => (
+            <button
+              key={lvl}
+              onClick={() => handleTimingChange('currentLevel', lvl)}
+              className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide border transition cursor-pointer ${
+                settings.currentLevel === lvl
+                  ? 'bg-natural-terracotta text-white border-natural-terracotta'
+                  : 'bg-natural-bg text-[#757570] border-natural-border'
+              }`}
+            >
+              Level {lvl}
+            </button>
+          ))}
+        </div>
+
+        {/* Bodyweight */}
+        <div className="flex flex-col gap-1.5 pt-3 border-t border-natural-border">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-natural-moss">Bodyweight (kg)</span>
+            <span className="text-[10px] text-[#8B8B80] font-mono">
+              {typeof settings.bodyweightKg === 'number' ? `${settings.bodyweightKg} kg` : 'Not set'}
+            </span>
+          </div>
+          <input
+            type="number"
+            inputMode="decimal"
+            min={0}
+            max={300}
+            step={0.5}
+            placeholder="e.g. 72"
+            value={typeof settings.bodyweightKg === 'number' ? settings.bodyweightKg : ''}
+            onChange={e => {
+              const v = parseFloat(e.target.value);
+              handleTimingChange('bodyweightKg', Number.isFinite(v) && v > 0 ? v : null);
+            }}
+            className="w-full px-3 py-2 text-sm bg-natural-bg border border-natural-border rounded-xl text-natural-dark font-mono focus:outline-none focus:border-natural-moss"
+          />
+          <p className="text-[10px] text-[#8B8B80] italic leading-relaxed">
+            Used to compute × BW hints on weight-based progression criteria (e.g. "Leg Press 0.5× BW"). Optional.
+          </p>
+        </div>
+      </div>
+
+      {/* 5. AI Coach (opt-in) */}
       <div className="p-5 bg-white rounded-2xl border border-natural-border flex flex-col gap-4 shadow-sm">
         <h3 className="text-xs font-bold text-natural-moss tracking-wider uppercase flex items-center gap-2">
           <Sparkles className="w-4 h-4 text-natural-moss" />

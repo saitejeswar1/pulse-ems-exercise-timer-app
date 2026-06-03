@@ -8,3 +8,5 @@ coverage/
 !.env.example
 *.apk
 custom_logos/
+physio-plan/
+templates/

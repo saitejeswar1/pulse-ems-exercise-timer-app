@@ -15,6 +15,8 @@ export interface WorkoutSettings {
   wakelock: boolean;
   aiInsightsEnabled?: boolean; // opt-in; default false
   aiInsightsAutoDay?: number | null; // 0=Sun..6=Sat for weekly auto-refresh, null=manual only
+  currentLevel?: number | null; // optional recovery-level focus, 1..9; null = no focus filter
+  bodyweightKg?: number | null; // user's bodyweight in kilograms; powers x BW criteria hints
 }
 
 export type WorkoutPhase = 'idle' | 'active' | 'rest' | 'transition' | 'done';
@@ -41,6 +43,20 @@ export interface PhysioExercise {
   weekdays?: string[]; // e.g. ['Mon', 'Wed', 'Fri'] for Day-wise scheduling
   weeklyTarget?: number; // e.g. 3 times per week
   locations?: ExerciseLocation[]; // where this can be performed; omitted = unspecified
+  level?: number; // optional recovery-level tag, 1..9
+  defaultWeightKg?: number; // last/typical load in kilograms; 0 or undefined = bodyweight
+  notes?: string;
+}
+
+export type SwellingLevel = 'none' | 'mild' | 'moderate' | 'severe';
+
+export interface SessionCheckIn {
+  id: string;
+  timestamp: number; // Unix ms
+  date: string; // YYYY-MM-DD (local)
+  painRating: number; // 0-10
+  swelling: SwellingLevel;
+  kneeFlexionDegrees?: number;
   notes?: string;
 }
 
@@ -54,4 +70,6 @@ export interface WorkoutLogEntry {
   cyclesCompleted: number;
   totalActiveSeconds: number;
   bestHoldSeconds?: number; // hold-mode only: longest single hold in the session
+  weightKg?: number; // load used (0 or undefined = bodyweight)
+  repsPerSetUsed?: number; // copy of the exercise's repsPerSet at time of logging (for trend display)
 }
