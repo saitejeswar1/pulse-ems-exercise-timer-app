@@ -21,6 +21,11 @@ interface PhysioScheduleProps {
   onSelectExercise: (ex: PhysioExercise) => void;
   onImportExercises: (exs: ImportedExercise[], mode: 'append' | 'replace') => void;
   onReorderExercise: (id: string, direction: 'up' | 'down') => void;
+  planIds: string[];
+  onToggleInPlan: (ex: PhysioExercise) => void;
+  onAddGroupToPlan: (group: PhysioExercise[]) => void;
+  focusLevelExercises: PhysioExercise[];
+  leveledExercises: PhysioExercise[];
 }
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -113,6 +118,11 @@ export default function PhysioSchedule({
   onSelectExercise,
   onImportExercises,
   onReorderExercise,
+  planIds,
+  onToggleInPlan,
+  onAddGroupToPlan,
+  focusLevelExercises,
+  leveledExercises,
 }: PhysioScheduleProps) {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -444,6 +454,29 @@ export default function PhysioSchedule({
           </button>
         </div>
       </div>
+
+      {/* Quick-add a whole level group to Today's Plan */}
+      {leveledExercises.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5 -mt-3">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-[#8B8B80] mr-0.5">
+            Quick-add to today
+          </span>
+          {focusLevelExercises.length > 0 && (
+            <button
+              onClick={() => onAddGroupToPlan(focusLevelExercises)}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide bg-natural-terracotta text-white hover:bg-[#C27A62] transition cursor-pointer"
+            >
+              <Plus className="w-3 h-3" /> ACL · L{currentLevel}
+            </button>
+          )}
+          <button
+            onClick={() => onAddGroupToPlan(leveledExercises)}
+            className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide bg-white border border-natural-moss/40 text-natural-moss hover:bg-natural-moss/10 transition cursor-pointer"
+          >
+            <Plus className="w-3 h-3" /> ACL plan
+          </button>
+        </div>
+      )}
 
       {/* Import / Export panel */}
       <input
@@ -1051,6 +1084,7 @@ export default function PhysioSchedule({
             }
             return visible.map((item) => {
             const isActive = item.id === activeExerciseId;
+            const inPlan = planIds.includes(item.id);
             const isEditingThis = editingId === item.id;
             const itemCategory = item.category ?? 'other';
             const catMeta = CATEGORIES.find(c => c.value === itemCategory);
@@ -1194,18 +1228,26 @@ export default function PhysioSchedule({
                   </div>
                 </div>
 
-                <div className="border-t border-natural-bg/55 pt-3 mt-1 flex justify-end">
+                <div className="border-t border-natural-bg/55 pt-3 mt-1 flex justify-end gap-2">
                   <button
-                    id={`btn-load-${item.id}`}
                     onClick={() => onSelectExercise(item)}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition duration-150 cursor-pointer ${
-                      isActive
-                        ? 'bg-natural-moss text-white shadow-sm'
-                        : 'bg-natural-bg text-natural-moss hover:bg-natural-border'
-                    }`}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-natural-bg text-natural-moss hover:bg-natural-border transition duration-150 cursor-pointer"
+                    title="Play this exercise on its own right now"
                   >
                     <Play className="w-3.5 h-3.5 fill-current" />
-                    {isActive ? 'Loaded' : 'Load into Timer'}
+                    Play now
+                  </button>
+                  <button
+                    id={`btn-load-${item.id}`}
+                    onClick={() => onToggleInPlan(item)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition duration-150 cursor-pointer ${
+                      inPlan
+                        ? 'bg-natural-moss text-white shadow-sm'
+                        : 'bg-natural-terracotta text-white hover:bg-[#C27A62]'
+                    }`}
+                  >
+                    {inPlan ? <Check className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
+                    {inPlan ? 'In Plan' : 'Add to Today'}
                   </button>
                 </div>
               </motion.div>

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Play, Pause, RotateCcw, Clock, Dumbbell, TrendingUp, Settings as SettingsIcon, Check, PlusCircle, CheckCircle2, CalendarCheck, SkipForward, X, Hourglass, Square, Pencil } from 'lucide-react';
+import { Play, Pause, RotateCcw, Clock, Dumbbell, TrendingUp, Settings as SettingsIcon, Check, PlusCircle, CheckCircle2, CalendarCheck, SkipForward, X, Hourglass, Square, Pencil, Plus, Trash2 } from 'lucide-react';
 import { WorkoutSettings, WorkoutPhase, PhysioExercise, WorkoutLogEntry, ExerciseMode, SessionCheckIn } from './types';
 import { audio } from './lib/audio';
 import { App as CapacitorApp } from '@capacitor/app';
@@ -26,8 +26,6 @@ const DEFAULTS: WorkoutSettings = {
   aiInsightsAutoDay: 0, // Sunday — weekly reflection day
   currentLevel: null,
 };
-
-const WEEKDAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 const INITIAL_EXERCISES: PhysioExercise[] = [
   {
@@ -114,6 +112,17 @@ export default function App() {
     return 0;
   });
 
+  // Date (YYYY-MM-DD) the current plan was last built/edited. Drives the midnight
+  // "yesterday's plan — start fresh?" prompt so the manual plan stays "today's".
+  const [planDate, setPlanDate] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem('pulse-queue-date');
+    } catch (e) {
+      return null;
+    }
+  });
+  const [showStalePlan, setShowStalePlan] = useState(false);
+
   const activeExerciseId = queue[queueIndex] ?? null;
 
   // Analytics Logs State
@@ -185,6 +194,29 @@ export default function App() {
       localStorage.removeItem('pulse-active-ex');
     } catch (e) {}
   }, [queue, queueIndex]);
+
+  useEffect(() => {
+    try {
+      if (planDate) localStorage.setItem('pulse-queue-date', planDate);
+      else localStorage.removeItem('pulse-queue-date');
+    } catch (e) {}
+  }, [planDate]);
+
+  // Midnight roll-over: if a plan built on an earlier day is still loaded, surface a
+  // "yesterday's plan — start fresh?" banner. Checked on mount and on app resume.
+  useEffect(() => {
+    const checkStalePlan = () => {
+      setShowStalePlan(
+        queue.length > 0 && !running && planDate != null && planDate !== todayDateString()
+      );
+    };
+    checkStalePlan();
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') checkStalePlan();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [queue.length, planDate, running]);
 
   useEffect(() => {
     try {
@@ -669,17 +701,74 @@ export default function App() {
     });
   };
 
+  // Play-now: replace the whole plan with this single exercise and jump to the timer.
   const handleSelectExercise = (ex: PhysioExercise) => {
     setQueue([ex.id]);
     setQueueIndex(0);
+    setPlanDate(todayDateString());
+    setShowStalePlan(false);
     loadExerciseIntoSettings(ex);
     handleReset();
     setCurrentView('timer');
   };
 
-  // Today's auto-loaded program (based on device timezone weekday)
-  const todayShort = WEEKDAY_SHORT[new Date().getDay()];
-  const todaysExercises = exercises.filter(e => e.weekdays?.includes(todayShort));
+  // Append a single exercise to today's plan (no-op if already in it). Tapping a tile
+  // that's already in the plan removes it again — a simple toggle.
+  const handleToggleInPlan = (ex: PhysioExercise) => {
+    if (queue.includes(ex.id)) {
+      handleRemoveFromPlan(ex.id);
+      return;
+    }
+    setQueue(prev => {
+      if (prev.includes(ex.id)) return prev;
+      if (prev.length === 0) loadExerciseIntoSettings(ex);
+      return [...prev, ex.id];
+    });
+    setPlanDate(todayDateString());
+    setShowStalePlan(false);
+  };
+
+  // Bulk-append a group of exercises (e.g. all Level-N exercises), preserving order and
+  // skipping any already in the plan.
+  const handleAddGroupToPlan = (group: PhysioExercise[]) => {
+    const ids = group.map(e => e.id);
+    if (ids.length === 0) return;
+    setQueue(prev => {
+      const merged = [...prev];
+      for (const id of ids) if (!merged.includes(id)) merged.push(id);
+      if (prev.length === 0 && merged.length > 0) {
+        const first = exercises.find(e => e.id === merged[0]);
+        if (first) loadExerciseIntoSettings(first);
+      }
+      return merged;
+    });
+    setPlanDate(todayDateString());
+    setShowStalePlan(false);
+  };
+
+  // Remove one exercise from the plan, keeping queueIndex pointing at the same item.
+  const handleRemoveFromPlan = (id: string) => {
+    setQueue(prev => {
+      const idx = prev.indexOf(id);
+      if (idx < 0) return prev;
+      const next = prev.filter(qid => qid !== id);
+      setQueueIndex(qi => {
+        if (next.length === 0) return 0;
+        if (idx < qi) return qi - 1;
+        return Math.min(qi, next.length - 1);
+      });
+      if (next.length === 0) setPlanDate(null);
+      return next;
+    });
+  };
+
+  // Start the built plan from the top. Reuses the play/pause fresh-start path.
+  const handleStartPlan = () => {
+    if (queue.length === 0) return;
+    setShowStalePlan(false);
+    if (phase !== 'idle' && phase !== 'done') handleReset();
+    if (!running) handlePlayPause();
+  };
 
   // Footer status line — contextual to the current phase
   const footerStatus = (() => {
@@ -719,27 +808,25 @@ export default function App() {
     // idle
     const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
     const doneToday = logs.filter(l => l.timestamp >= startOfDay.getTime()).length;
-    const planned = todaysExercises.length;
+    const planned = queue.length;
     if (planned > 0) return `v1.2 · offline · ${doneToday} of ${planned} done today`;
     if (doneToday > 0) return `v1.2 · offline · ${doneToday} session${doneToday === 1 ? '' : 's'} today`;
     return 'v1.2 · offline · no accounts';
   })();
 
-  const handleStartTodaysProgram = () => {
-    if (todaysExercises.length === 0) return;
-    const ids = todaysExercises.map(e => e.id);
-    setQueue(ids);
-    setQueueIndex(0);
-    loadExerciseIntoSettings(todaysExercises[0]);
-    handleReset();
-    setCurrentView('timer');
-  };
-
   const handleClearQueue = () => {
     setQueue([]);
     setQueueIndex(0);
+    setPlanDate(null);
+    setShowStalePlan(false);
     handleReset();
   };
+
+  // Exercises grouped by recovery level, for the "Add ACL plan" quick-add buttons.
+  const leveledExercises = exercises.filter(e => typeof e.level === 'number');
+  const focusLevelExercises = settings.currentLevel != null
+    ? exercises.filter(e => e.level === settings.currentLevel)
+    : [];
 
   // Quick edit of an exercise's load. Tapping the Weight pill prompts for a new kg value;
   // empty / 0 means bodyweight. Persists to defaultWeightKg so next session prefills.
@@ -854,68 +941,131 @@ export default function App() {
                 transition={{ duration: 0.15 }}
                 className="flex flex-col gap-6"
               >
-                {/* Today's Program / Queue panel */}
+                {/* Stale-plan (built on an earlier day) prompt */}
+                {showStalePlan && (
+                  <div className="p-3.5 bg-natural-terracotta/10 border border-natural-terracotta/30 rounded-xl flex items-center gap-3">
+                    <CalendarCheck className="w-4 h-4 text-natural-terracotta flex-shrink-0" />
+                    <p className="text-[11px] text-natural-dark flex-1 leading-snug">
+                      This plan is from an earlier day. Start fresh for today?
+                    </p>
+                    <button
+                      onClick={handleClearQueue}
+                      className="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-natural-terracotta text-white hover:bg-[#C27A62] transition cursor-pointer flex-shrink-0"
+                    >
+                      Start fresh
+                    </button>
+                    <button
+                      onClick={() => { setPlanDate(todayDateString()); setShowStalePlan(false); }}
+                      className="px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider text-[#70706B] hover:text-natural-dark transition cursor-pointer flex-shrink-0"
+                    >
+                      Keep
+                    </button>
+                  </div>
+                )}
+
+                {/* Today's Plan — manually built session */}
                 {queue.length === 0 ? (
-                  todaysExercises.length > 0 ? (
-                    <div className="p-4 bg-natural-moss/5 border border-natural-moss/25 rounded-xl flex flex-col gap-2.5">
-                      <div className="flex items-center gap-2">
-                        <CalendarCheck className="w-4 h-4 text-natural-moss" />
-                        <span className="text-[11px] font-bold uppercase tracking-wider text-natural-moss">
-                          {todayShort}'s Program — {todaysExercises.length} exercise{todaysExercises.length === 1 ? '' : 's'}
-                        </span>
-                      </div>
-                      <div className="flex flex-col gap-1">
-                        {todaysExercises.map((ex, i) => (
-                          <div key={ex.id} className="flex items-center gap-2 text-[11px]">
-                            <span className="w-4 h-4 rounded-full bg-natural-moss text-white font-bold text-[9px] flex items-center justify-center flex-shrink-0">
-                              {i + 1}
-                            </span>
-                            <span className="font-semibold text-natural-dark truncate">{ex.name}</span>
-                            <span className="font-mono text-[10px] text-[#757570] ml-auto whitespace-nowrap">
-                              {(ex.mode ?? 'time') === 'reps' ? `${ex.repsPerSet ?? '?'} reps` : `${ex.activeDur}s`} × {ex.targetCycles}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                      <motion.button
-                        onClick={handleStartTodaysProgram}
-                        whileTap={{ scale: 0.97 }}
-                        className="mt-1 w-full py-2.5 bg-natural-moss hover:bg-[#4E4E36] text-white rounded-xl text-xs font-bold uppercase tracking-wider transition cursor-pointer flex items-center justify-center gap-1.5"
-                      >
-                        <Play className="w-3.5 h-3.5 fill-current" />
-                        Load Today's Program
-                      </motion.button>
+                  <div className="p-4 bg-natural-moss/5 border border-natural-moss/25 rounded-xl flex flex-col gap-3">
+                    <div className="flex items-center gap-2">
+                      <CalendarCheck className="w-4 h-4 text-natural-moss" />
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-natural-moss">
+                        Today's Plan
+                      </span>
                     </div>
-                  ) : (
-                    <div className="p-3.5 bg-natural-bg/70 border border-dashed border-natural-border rounded-xl text-center">
-                      <p className="text-[11px] text-[#70706B]">
-                        No exercises scheduled for {todayShort}. Pick one from the <strong className="text-natural-moss">Program</strong> tab.
-                      </p>
-                    </div>
-                  )
+                    <p className="text-[11px] text-[#70706B] leading-snug">
+                      Your plan is empty. Build today's session by tapping exercises — pull in your whole ACL plan, or pick gym exercises one at a time.
+                    </p>
+                    {leveledExercises.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {focusLevelExercises.length > 0 && (
+                          <button
+                            onClick={() => handleAddGroupToPlan(focusLevelExercises)}
+                            className="flex items-center gap-1 px-2.5 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wide bg-natural-terracotta text-white hover:bg-[#C27A62] transition cursor-pointer"
+                          >
+                            <Plus className="w-3 h-3" /> ACL · L{settings.currentLevel}
+                          </button>
+                        )}
+                        <button
+                          onClick={() => handleAddGroupToPlan(leveledExercises)}
+                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wide bg-white border border-natural-moss/40 text-natural-moss hover:bg-natural-moss/10 transition cursor-pointer"
+                        >
+                          <Plus className="w-3 h-3" /> ACL plan
+                        </button>
+                      </div>
+                    )}
+                    <button
+                      onClick={() => setCurrentView('schedule')}
+                      className="w-full py-2.5 bg-white border border-natural-border text-natural-moss rounded-xl text-xs font-bold uppercase tracking-wider transition cursor-pointer flex items-center justify-center gap-1.5 hover:bg-natural-bg"
+                    >
+                      <PlusCircle className="w-3.5 h-3.5" />
+                      Browse &amp; add exercises
+                    </button>
+                  </div>
                 ) : (
-                  <div className="p-3.5 bg-natural-moss/5 border border-natural-moss/25 rounded-xl flex flex-col gap-2">
+                  <div className="p-4 bg-natural-moss/5 border border-natural-moss/25 rounded-xl flex flex-col gap-3">
                     <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2 min-w-0 flex-1">
-                        <Dumbbell className="w-4 h-4 text-natural-moss flex-shrink-0" />
-                        <div className="flex flex-col min-w-0">
-                          <span className="text-[9px] font-bold uppercase tracking-wider text-natural-moss/80">
-                            {queue.length > 1 ? `Now — ${queueIndex + 1} / ${queue.length}` : 'Loaded'}
-                          </span>
-                          <span className="text-sm font-bold text-natural-dark truncate">
-                            {currentExercise?.name ?? 'Exercise'}
-                          </span>
-                        </div>
+                      <div className="flex items-center gap-2 min-w-0">
+                        <CalendarCheck className="w-4 h-4 text-natural-moss flex-shrink-0" />
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-natural-moss">
+                          Today's Plan — {queue.length} exercise{queue.length === 1 ? '' : 's'}
+                          {running && queue.length > 1 && (
+                            <span className="text-natural-moss/70"> · now {queueIndex + 1}/{queue.length}</span>
+                          )}
+                        </span>
                       </div>
                       <button
                         onClick={handleClearQueue}
                         className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] text-[#70706B] hover:text-natural-terracotta hover:bg-natural-terracotta/10 font-bold uppercase tracking-wider transition cursor-pointer flex-shrink-0"
-                        aria-label="Unload routine"
+                        aria-label="Clear plan"
                       >
                         <X className="w-3 h-3" />
-                        {queue.length > 1 ? 'Clear' : 'Unload'}
+                        Clear
                       </button>
                     </div>
+
+                    {/* Plan items */}
+                    <div className="flex flex-col gap-1.5">
+                      {queue.map((qid, i) => {
+                        const ex = exercises.find(e => e.id === qid);
+                        if (!ex) return null;
+                        const done = i < queueIndex || phase === 'done';
+                        const current = i === queueIndex && phase !== 'done';
+                        return (
+                          <div
+                            key={qid}
+                            className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border text-[11px] ${
+                              current
+                                ? 'bg-white border-natural-moss'
+                                : done
+                                  ? 'bg-natural-moss/5 border-natural-moss/20'
+                                  : 'bg-white border-natural-border'
+                            }`}
+                          >
+                            <span className={`w-4 h-4 rounded-full font-bold text-[9px] flex items-center justify-center flex-shrink-0 ${
+                              done ? 'bg-natural-moss/20 text-natural-moss' : 'bg-natural-moss text-white'
+                            }`}>
+                              {done ? <Check className="w-2.5 h-2.5" /> : i + 1}
+                            </span>
+                            <span className={`font-semibold truncate ${done ? 'text-[#9a9a90] line-through' : 'text-natural-dark'}`}>
+                              {ex.name}
+                            </span>
+                            <span className="font-mono text-[10px] text-[#757570] ml-auto whitespace-nowrap">
+                              {(ex.mode ?? 'time') === 'reps' ? `${ex.repsPerSet ?? '?'} reps` : `${ex.activeDur}s`} × {ex.targetCycles}
+                            </span>
+                            {!running && (
+                              <button
+                                onClick={() => handleRemoveFromPlan(qid)}
+                                className="p-0.5 text-gray-400 hover:text-natural-terracotta rounded transition cursor-pointer flex-shrink-0"
+                                aria-label={`Remove ${ex.name} from plan`}
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+
                     {currentExercise && (
                       <button
                         onClick={() => handleEditWeight(currentExercise.id)}
@@ -929,29 +1079,44 @@ export default function App() {
                         <Pencil className="w-2.5 h-2.5 opacity-60" />
                       </button>
                     )}
-                    {queue.length > 1 && (
-                      <div className="flex gap-1 overflow-x-auto">
-                        {queue.map((qid, i) => {
-                          const ex = exercises.find(e => e.id === qid);
-                          if (!ex) return null;
-                          const done = i < queueIndex || phase === 'done';
-                          const current = i === queueIndex && phase !== 'done';
-                          return (
-                            <div
-                              key={qid}
-                              className={`flex-shrink-0 px-2.5 py-1 rounded-lg text-[10px] font-bold border ${
-                                current
-                                  ? 'bg-natural-moss text-white border-natural-moss'
-                                  : done
-                                    ? 'bg-natural-moss/10 text-natural-moss border-natural-moss/30 line-through'
-                                    : 'bg-white text-[#70706B] border-natural-border'
-                              }`}
-                            >
-                              {i + 1}. {ex.name}
-                            </div>
-                          );
-                        })}
+
+                    {/* Add more */}
+                    {!running && (
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {focusLevelExercises.length > 0 && (
+                          <button
+                            onClick={() => handleAddGroupToPlan(focusLevelExercises)}
+                            className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide bg-white border border-natural-terracotta/40 text-natural-terracotta hover:bg-natural-terracotta/10 transition cursor-pointer"
+                          >
+                            <Plus className="w-3 h-3" /> ACL · L{settings.currentLevel}
+                          </button>
+                        )}
+                        {leveledExercises.length > 0 && (
+                          <button
+                            onClick={() => handleAddGroupToPlan(leveledExercises)}
+                            className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide bg-white border border-natural-moss/40 text-natural-moss hover:bg-natural-moss/10 transition cursor-pointer"
+                          >
+                            <Plus className="w-3 h-3" /> ACL plan
+                          </button>
+                        )}
+                        <button
+                          onClick={() => setCurrentView('schedule')}
+                          className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide text-[#70706B] hover:text-natural-dark transition cursor-pointer"
+                        >
+                          <PlusCircle className="w-3 h-3" /> More
+                        </button>
                       </div>
+                    )}
+
+                    {(phase === 'idle' || phase === 'done') && (
+                      <motion.button
+                        onClick={handleStartPlan}
+                        whileTap={{ scale: 0.97 }}
+                        className="w-full py-2.5 bg-natural-moss hover:bg-[#4E4E36] text-white rounded-xl text-xs font-bold uppercase tracking-wider transition cursor-pointer flex items-center justify-center gap-1.5"
+                      >
+                        <Play className="w-3.5 h-3.5 fill-current" />
+                        {phase === 'done' ? 'Restart Plan' : 'Start Plan'}
+                      </motion.button>
                     )}
                   </div>
                 )}
@@ -1189,6 +1354,11 @@ export default function App() {
                   onImportExercises={handleImportExercises}
                   onReorderExercise={handleReorderExercise}
                   onSelectExercise={handleSelectExercise}
+                  planIds={queue}
+                  onToggleInPlan={handleToggleInPlan}
+                  onAddGroupToPlan={handleAddGroupToPlan}
+                  focusLevelExercises={focusLevelExercises}
+                  leveledExercises={leveledExercises}
                 />
               </motion.div>
             )}
