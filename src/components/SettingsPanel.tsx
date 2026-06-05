@@ -470,6 +470,55 @@ export default function SettingsPanel({ settings, onChange, onClose }: SettingsP
         </p>
       </div>
 
+      {/* 6. Daily reminder (opt-in adherence nudge) */}
+      <div className="p-5 bg-white rounded-2xl border border-natural-border flex flex-col gap-4 shadow-sm">
+        <h3 className="text-xs font-bold text-natural-moss tracking-wider uppercase flex items-center gap-2">
+          <BellRing className="w-4 h-4 text-natural-moss" />
+          Daily Reminder
+        </h3>
+
+        <div className="flex justify-between items-start gap-3 p-3.5 bg-natural-bg rounded-xl border border-natural-border">
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-semibold text-natural-dark">Remind me if I haven't trained</div>
+            <div className="text-[11px] text-[#70706B] mt-0.5 leading-relaxed">
+              Sends one reminder at the time below — only on days you haven't logged a session yet. Logging a workout cancels that day's reminder. Stays on your device; no account needed.
+            </div>
+          </div>
+          <button
+            id="reminder-toggle"
+            onClick={() => handleTimingChange('reminderEnabled', !settings.reminderEnabled)}
+            className={`w-12 h-6 rounded-full relative transition-colors duration-200 focus:outline-none flex-shrink-0 ${
+              settings.reminderEnabled ? 'bg-natural-moss' : 'bg-[#E5E5E0]'
+            }`}
+          >
+            <div className={`w-5 h-5 rounded-full bg-white absolute top-0.5 left-0.5 transition-transform duration-200 shadow-sm ${
+              settings.reminderEnabled ? 'translate-x-6' : 'translate-x-0'
+            }`} />
+          </button>
+        </div>
+
+        {settings.reminderEnabled && (
+          <div className="p-3.5 bg-natural-bg rounded-xl border border-natural-border flex justify-between items-center gap-3">
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-semibold text-natural-dark">Remind me by</div>
+              <div className="text-[11px] text-[#70706B] mt-0.5 leading-relaxed">
+                Pick the end of your training window. Train any time before this — morning or evening — and you won't be nudged.
+              </div>
+            </div>
+            <input
+              type="time"
+              value={settings.reminderTime ?? '20:00'}
+              onChange={(e) => handleTimingChange('reminderTime', e.target.value || '20:00')}
+              className="px-3 py-2 rounded-lg border border-natural-border bg-white text-natural-dark font-mono text-sm focus:outline-none focus:border-natural-moss flex-shrink-0"
+            />
+          </div>
+        )}
+
+        <p className="text-[10px] text-[#8B8B80] italic leading-relaxed">
+          Uses your device's notification system — nothing runs in the background. You may be asked to allow notifications the first time.
+        </p>
+      </div>
+
     </div>
   );
 }

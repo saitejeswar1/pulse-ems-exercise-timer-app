@@ -17,6 +17,8 @@ export interface WorkoutSettings {
   aiInsightsAutoDay?: number | null; // 0=Sun..6=Sat for weekly auto-refresh, null=manual only
   currentLevel?: number | null; // optional recovery-level focus, 1..9; null = no focus filter
   bodyweightKg?: number | null; // user's bodyweight in kilograms; powers x BW criteria hints
+  reminderEnabled?: boolean; // opt-in adherence nudge; default false
+  reminderTime?: string; // "HH:MM" 24h local deadline; nudge fires then if no session logged that day
 }
 
 export type WorkoutPhase = 'idle' | 'active' | 'rest' | 'transition' | 'done';

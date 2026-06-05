@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
-import { Play, Pause, RotateCcw, Clock, Dumbbell, TrendingUp, Settings as SettingsIcon, Check, PlusCircle, CheckCircle2, CalendarCheck, SkipForward, X, Hourglass, Square, Pencil, Plus, Trash2 } from 'lucide-react';
+import { Play, Pause, RotateCcw, Clock, Dumbbell, TrendingUp, Settings as SettingsIcon, Check, PlusCircle, CheckCircle2, CalendarCheck, SkipForward, X, Hourglass, Square, Pencil, Plus, StopCircle } from 'lucide-react';
 import { WorkoutSettings, WorkoutPhase, PhysioExercise, WorkoutLogEntry, ExerciseMode, SessionCheckIn } from './types';
 import { audio } from './lib/audio';
+import { reconcileReminders } from './lib/reminders';
 import { App as CapacitorApp } from '@capacitor/app';
 import SettingsPanel from './components/SettingsPanel';
 import Waveform from './components/Waveform';
@@ -9,7 +10,8 @@ import PhysioSchedule from './components/PhysioSchedule';
 import AnalyticsPanel from './components/AnalyticsPanel';
 import PostSessionCheckIn from './components/PostSessionCheckIn';
 import ProgressionSheet, { ProgressionState } from './components/ProgressionSheet';
-import { motion, AnimatePresence } from 'motion/react';
+import PlanRow from './components/PlanRow';
+import { motion, AnimatePresence, Reorder } from 'motion/react';
 
 const DEFAULTS: WorkoutSettings = {
   activeDur: 15,
@@ -25,6 +27,8 @@ const DEFAULTS: WorkoutSettings = {
   aiInsightsEnabled: false,
   aiInsightsAutoDay: 0, // Sunday — weekly reflection day
   currentLevel: null,
+  reminderEnabled: false,
+  reminderTime: '20:00',
 };
 
 const INITIAL_EXERCISES: PhysioExercise[] = [
@@ -172,6 +176,9 @@ export default function App() {
 
   // Hold-mode: per-set elapsed seconds recorded when the user taps Stop
   const holdSecondsRef = useRef<number[]>([]);
+  // Timestamp of when the current sitting began — used to scope the end-of-session summary
+  // to just this workout (not earlier sessions logged the same day). In-memory like `phase`.
+  const sessionStartRef = useRef<number>(0);
 
   // Derived current exercise & mode
   const currentExercise = activeExerciseId
@@ -223,6 +230,13 @@ export default function App() {
       localStorage.setItem('pulse-logs', JSON.stringify(logs));
     } catch (e) {}
   }, [logs]);
+
+  // Adherence nudge: re-sync the scheduled reminders whenever logs change (a freshly logged
+  // session cancels today's nudge) or the reminder settings change. Also runs on mount.
+  useEffect(() => {
+    reconcileReminders(settings, logs);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [logs, settings.reminderEnabled, settings.reminderTime]);
 
   useEffect(() => {
     try {
@@ -547,7 +561,9 @@ export default function App() {
       requestWakeLockState();
 
       if (phase === 'idle' || phase === 'done') {
-        // Fresh start — if there's a multi-exercise queue, restart from the first one
+        // Fresh start — mark the sitting's start so the summary covers only this workout.
+        sessionStartRef.current = Date.now();
+        // if there's a multi-exercise queue, restart from the first one
         if (queue.length > 0) {
           setQueueIndex(0);
           const firstEx = exercises.find(e => e.id === queue[0]);
@@ -621,6 +637,27 @@ export default function App() {
     metronomeLastSecRef.current = -1;
   };
 
+  // End today's session early. Logs whatever's in progress, finishes the workout, and
+  // prompts the daily check-in — the same wrap-up the tick loop runs when the whole plan
+  // auto-completes. The plan stays put (the midnight banner clears it tomorrow).
+  const handleEndSession = () => {
+    if (phase === 'idle' || phase === 'done') return;
+    if (cycles > 0) logWorkoutSession(cycles);
+    setRunning(false);
+    audio.stopContinuousTone();
+    releaseWakeLockState();
+    setPhase('done');
+    setCycles(0);
+    holdSecondsRef.current = [];
+    setProgressPercent(100);
+    phaseElapsedBeforePauseRef.current = 0;
+    lastCountdownTickRef.current = -1;
+    metronomeLastSecRef.current = -1;
+    audio.playWorkoutComplete();
+    triggerVibe([100, 60, 100, 60, 200]);
+    if (!hasCheckInToday()) setShowCheckIn(true);
+  };
+
   // Safe visual clean labels
   const getPhaseName = () => {
     if (phase === 'idle') return 'Standing By';
@@ -634,6 +671,34 @@ export default function App() {
   const upNextExercise = phase === 'transition'
     ? exercises.find(e => e.id === queue[queueIndex + 1])
     : undefined;
+
+  // End-of-session recap, scoped to this sitting (logs since the session started). Rendered
+  // when phase === 'done', so it covers both a fully-completed plan and an early End Session.
+  const sessionSummary = (() => {
+    const sessionLogs = sessionStartRef.current > 0
+      ? logs.filter(l => l.timestamp >= sessionStartRef.current)
+      : [];
+    const exerciseCount = sessionLogs.length;
+    const totalSets = sessionLogs.reduce((a, l) => a + (l.cyclesCompleted || 0), 0);
+    const totalActiveSec = sessionLogs.reduce((a, l) => a + (l.totalActiveSeconds || 0), 0);
+    const mins = Math.floor(totalActiveSec / 60);
+    const secs = totalActiveSec % 60;
+    const timeLabel = totalActiveSec === 0
+      ? '0s'
+      : mins > 0 ? (secs > 0 ? `${mins}m ${secs}s` : `${mins}m`) : `${secs}s`;
+    const planned = queue.length;
+    let message: string;
+    if (exerciseCount === 0) {
+      message = 'Session ended — nothing logged this time. That’s okay, rest up.';
+    } else if (planned > 0 && exerciseCount >= planned) {
+      message = 'Nice work — you finished today’s plan. 💪';
+    } else if (planned > 0) {
+      message = `Good session — ${exerciseCount} of ${planned} planned done. Rest up. 💪`;
+    } else {
+      message = 'Session logged. Rest up. 💪';
+    }
+    return { exerciseCount, totalSets, timeLabel, message };
+  })();
 
   // Handlers for exercises schedule
   const handleAddExercise = (newEx: Omit<PhysioExercise, 'id'>) => {
@@ -742,6 +807,14 @@ export default function App() {
       }
       return merged;
     });
+    setPlanDate(todayDateString());
+    setShowStalePlan(false);
+  };
+
+  // Reorder the plan via drag. Only reachable before a run starts (drag handle is hidden
+  // while running) and Start resets queueIndex to 0, so there's no run position to fix up.
+  const handleReorderPlan = (next: string[]) => {
+    setQueue(next);
     setPlanDate(todayDateString());
     setShowStalePlan(false);
   };
@@ -1023,48 +1096,32 @@ export default function App() {
                       </button>
                     </div>
 
-                    {/* Plan items */}
-                    <div className="flex flex-col gap-1.5">
+                    {/* Plan items — drag the grip to reorder (disabled once running) */}
+                    <Reorder.Group
+                      axis="y"
+                      values={queue}
+                      onReorder={handleReorderPlan}
+                      className="flex flex-col gap-1.5"
+                    >
                       {queue.map((qid, i) => {
                         const ex = exercises.find(e => e.id === qid);
                         if (!ex) return null;
                         const done = i < queueIndex || phase === 'done';
                         const current = i === queueIndex && phase !== 'done';
                         return (
-                          <div
+                          <PlanRow
                             key={qid}
-                            className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border text-[11px] ${
-                              current
-                                ? 'bg-white border-natural-moss'
-                                : done
-                                  ? 'bg-natural-moss/5 border-natural-moss/20'
-                                  : 'bg-white border-natural-border'
-                            }`}
-                          >
-                            <span className={`w-4 h-4 rounded-full font-bold text-[9px] flex items-center justify-center flex-shrink-0 ${
-                              done ? 'bg-natural-moss/20 text-natural-moss' : 'bg-natural-moss text-white'
-                            }`}>
-                              {done ? <Check className="w-2.5 h-2.5" /> : i + 1}
-                            </span>
-                            <span className={`font-semibold truncate ${done ? 'text-[#9a9a90] line-through' : 'text-natural-dark'}`}>
-                              {ex.name}
-                            </span>
-                            <span className="font-mono text-[10px] text-[#757570] ml-auto whitespace-nowrap">
-                              {(ex.mode ?? 'time') === 'reps' ? `${ex.repsPerSet ?? '?'} reps` : `${ex.activeDur}s`} × {ex.targetCycles}
-                            </span>
-                            {!running && (
-                              <button
-                                onClick={() => handleRemoveFromPlan(qid)}
-                                className="p-0.5 text-gray-400 hover:text-natural-terracotta rounded transition cursor-pointer flex-shrink-0"
-                                aria-label={`Remove ${ex.name} from plan`}
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            )}
-                          </div>
+                            id={qid}
+                            ex={ex}
+                            index={i}
+                            done={done}
+                            current={current}
+                            running={running}
+                            onRemove={handleRemoveFromPlan}
+                          />
                         );
                       })}
-                    </div>
+                    </Reorder.Group>
 
                     {currentExercise && (
                       <button
@@ -1283,19 +1340,55 @@ export default function App() {
                   </motion.button>
                 </div>
 
-                {/* Manual completion save indicator if they paused inside a workout */}
-                {cycles > 0 && !running && phase !== 'done' && (
+                {/* Session recap — shown after a session ends (End Session or full completion) */}
+                {phase === 'done' && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="p-4 bg-natural-moss/5 border border-natural-moss/25 rounded-xl flex flex-col gap-3"
+                  >
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4 text-natural-moss flex-shrink-0" />
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-natural-moss">
+                        Session Complete
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="flex flex-col items-center">
+                        <span className="text-lg font-black font-mono text-natural-dark leading-none">{sessionSummary.exerciseCount}</span>
+                        <span className="text-[9px] text-[#70706B] uppercase font-bold tracking-wider mt-1">
+                          Exercise{sessionSummary.exerciseCount === 1 ? '' : 's'}
+                        </span>
+                      </div>
+                      <div className="flex flex-col items-center">
+                        <span className="text-lg font-black font-mono text-natural-dark leading-none">{sessionSummary.totalSets}</span>
+                        <span className="text-[9px] text-[#70706B] uppercase font-bold tracking-wider mt-1">
+                          Set{sessionSummary.totalSets === 1 ? '' : 's'}
+                        </span>
+                      </div>
+                      <div className="flex flex-col items-center">
+                        <span className="text-lg font-black font-mono text-natural-dark leading-none">{sessionSummary.timeLabel}</span>
+                        <span className="text-[9px] text-[#70706B] uppercase font-bold tracking-wider mt-1">
+                          Under Tension
+                        </span>
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-natural-dark leading-snug text-center">
+                      {sessionSummary.message}
+                    </p>
+                  </motion.div>
+                )}
+
+                {/* End today's session early — logs in-progress work, finishes, prompts check-in */}
+                {phase !== 'idle' && phase !== 'done' && (
                   <motion.button
                     initial={{ opacity: 0, y: 5 }}
                     animate={{ opacity: 1, y: 0 }}
-                    onClick={() => {
-                      logWorkoutSession(cycles);
-                      handleReset();
-                    }}
-                    className="w-full py-3 bg-natural-moss/10 border border-natural-moss/20 hover:bg-natural-moss/15 text-natural-moss rounded-xl text-xs font-bold uppercase tracking-wider transition cursor-pointer flex items-center justify-center gap-1.5"
+                    onClick={handleEndSession}
+                    className="w-full py-3 bg-natural-terracotta/10 border border-natural-terracotta/30 hover:bg-natural-terracotta/15 text-natural-terracotta rounded-xl text-xs font-bold uppercase tracking-wider transition cursor-pointer flex items-center justify-center gap-1.5"
                   >
-                    <PlusCircle className="w-4 h-4" />
-                    Log Current {cycles} Cycles and Reset
+                    <StopCircle className="w-4 h-4" />
+                    End Session{cycles > 0 ? ` · Log ${cycles} Cycle${cycles === 1 ? '' : 's'}` : ''}
                   </motion.button>
                 )}
 
