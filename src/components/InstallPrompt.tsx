@@ -74,7 +74,7 @@ export default function InstallPrompt() {
             <Download className="w-5 h-5 animate-bounce" />
           </div>
           <div>
-            <div className="font-semibold text-sm tracking-tight text-natural-dark">Save Pulse as an Android App</div>
+            <div className="font-semibold text-sm tracking-tight text-natural-dark">Save Rebound as an Android App</div>
             <div className="text-xs text-[#70706B]">Run exercises offline with wake lock instantly</div>
           </div>
         </div>
@@ -99,7 +99,7 @@ export default function InstallPrompt() {
               <li>Open this page in <strong className="text-natural-dark">Google Chrome</strong> on your phone.</li>
               <li>Tap the browser menu button (<strong className="text-natural-dark">⋮</strong>) in the top-right.</li>
               <li>Select <strong className="text-natural-dark">"Add to Home screen"</strong> or <strong className="text-natural-dark">"Install app"</strong>.</li>
-              <li>Once installed, open <strong className="text-natural-moss">Pulse</strong> directly from your apps grid.</li>
+              <li>Once installed, open <strong className="text-natural-moss">Rebound</strong> directly from your apps grid.</li>
             </ol>
             <button 
               onClick={() => setShowTip(false)}

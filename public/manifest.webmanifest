@@ -1,7 +1,7 @@
 {
-  "name": "Pulse EMS Exercise Timer",
-  "short_name": "Pulse",
-  "description": "An installable interval timer for EMS (electronic muscle stimulation) workouts with responsive waveforms, audio feedback, and haptics.",
+  "name": "Rebound — ACL Recovery Companion",
+  "short_name": "Rebound",
+  "description": "An offline-first companion for ACL recovery: build today's plan, run it on a glanceable timer, track pain, swelling, and load, and climb the 9 recovery levels — all on your device, no account required.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#090b0f",

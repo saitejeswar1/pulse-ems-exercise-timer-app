@@ -1,6 +1,6 @@
-# Pulse • EMS Exercise Timer — Developer Guide
+# Rebound — Developer Guide
 
-This document is a technical guide for developers working on the **Pulse • EMS Exercise Timer** application. It details local setup, the development cycle, build pipelines, and how to compile the application for both web and native Android platforms.
+This document is a technical guide for developers working on **Rebound** (the ACL-recovery edition of the Pulse exercise timer). It details local setup, the development cycle, build pipelines, and how to compile the application for both web and native Android platforms.
 
 ---
 

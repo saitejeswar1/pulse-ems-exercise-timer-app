@@ -79,7 +79,7 @@ export async function reconcileReminders(settings: WorkoutSettings, logs: Workou
 
     notifications.push({
       id: NUDGE_ID_BASE + i,
-      title: 'Pulse — today’s session',
+      title: 'Rebound — today’s session',
       body: 'You haven’t logged a session today. A few minutes still counts. 💪',
       schedule: { at: day, allowWhileIdle: true },
     });

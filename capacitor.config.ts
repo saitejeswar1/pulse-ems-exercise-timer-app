@@ -2,7 +2,7 @@ import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   appId: 'com.myphysio.pulsetimer',
-  appName: 'Pulse Timer',
+  appName: 'Rebound',
   webDir: 'dist'
 };
 
