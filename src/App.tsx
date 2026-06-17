@@ -129,7 +129,11 @@ export default function App() {
   // Wake lock ref to resist garbage collection
   const wakeLockRef = useRef<any>(null);
 
-  // Timekeepers for requestAnimationFrame delta tracking
+  // Timekeepers for requestAnimationFrame delta tracking.
+  // NOTE: these MUST use Date.now() (wall clock), not performance.now(). On Android the
+  // monotonic clock behind performance.now() freezes while the device is in deep sleep
+  // (screen locked / pocket), so a locked phone would under-count the timer. Date.now()
+  // keeps advancing through suspend, so on unlock the next tick recovers the true elapsed time.
   const phaseStartRef = useRef<number>(0);
   const phaseElapsedBeforePauseRef = useRef<number>(0);
   const rafRef = useRef<number | null>(null);
@@ -287,7 +291,7 @@ export default function App() {
       return;
     }
 
-    phaseStartRef.current = performance.now() / 1000;
+    phaseStartRef.current = Date.now() / 1000;
 
     const tick = () => {
       // Prefer the loaded exercise's own params over the global settings.
@@ -296,7 +300,7 @@ export default function App() {
       const targetCyc = currentExercise?.targetCycles ?? settings.targetCycles;
       const interRest = settings.interExerciseRest;
 
-      const now = performance.now() / 1000;
+      const now = Date.now() / 1000;
       const elapsed = (now - phaseStartRef.current) + phaseElapsedBeforePauseRef.current;
       const isRepActive = phase === 'active' && currentMode === 'reps';
       const isHoldActive = phase === 'active' && currentMode === 'hold';
@@ -351,7 +355,7 @@ export default function App() {
           metronomeLastSecRef.current = -1;
           audio.playPhaseStart('rest', settings.sound);
           triggerVibe([60, 40, 60]);
-          phaseStartRef.current = performance.now() / 1000;
+          phaseStartRef.current = Date.now() / 1000;
           phaseElapsedBeforePauseRef.current = 0;
         } else if (phase === 'rest') {
           // Rest done → cycle complete
@@ -370,7 +374,7 @@ export default function App() {
               metronomeLastSecRef.current = -1;
               audio.playPhaseStart('rest', settings.sound);
               triggerVibe([60, 40, 60]);
-              phaseStartRef.current = performance.now() / 1000;
+              phaseStartRef.current = Date.now() / 1000;
               phaseElapsedBeforePauseRef.current = 0;
               return;
             }
@@ -391,7 +395,7 @@ export default function App() {
           metronomeLastSecRef.current = -1;
           audio.playPhaseStart('active', settings.sound);
           triggerVibe([60, 40, 60]);
-          phaseStartRef.current = performance.now() / 1000;
+          phaseStartRef.current = Date.now() / 1000;
           phaseElapsedBeforePauseRef.current = 0;
         } else if (phase === 'transition') {
           // Inter-exercise rest done → advance to next exercise
@@ -405,7 +409,7 @@ export default function App() {
           metronomeLastSecRef.current = -1;
           audio.playPhaseStart('active', settings.sound);
           triggerVibe([60, 40, 60]);
-          phaseStartRef.current = performance.now() / 1000;
+          phaseStartRef.current = Date.now() / 1000;
           phaseElapsedBeforePauseRef.current = 0;
         }
       }
@@ -425,7 +429,7 @@ export default function App() {
     if (running) {
       // Pause
       setRunning(false);
-      const currentTime = performance.now() / 1000;
+      const currentTime = Date.now() / 1000;
       phaseElapsedBeforePauseRef.current += currentTime - phaseStartRef.current;
       audio.stopContinuousTone();
       releaseWakeLockState();
@@ -465,7 +469,7 @@ export default function App() {
     metronomeLastSecRef.current = -1;
     audio.playPhaseStart('active', settings.sound);
     triggerVibe([60, 40, 60]);
-    phaseStartRef.current = performance.now() / 1000;
+    phaseStartRef.current = Date.now() / 1000;
     phaseElapsedBeforePauseRef.current = 0;
   };
 
@@ -473,7 +477,7 @@ export default function App() {
   const handleCompleteSet = () => {
     if (!running || phase !== 'active' || (currentMode !== 'reps' && currentMode !== 'hold')) return;
     if (currentMode === 'hold') {
-      const now = performance.now() / 1000;
+      const now = Date.now() / 1000;
       const elapsed = (now - phaseStartRef.current) + phaseElapsedBeforePauseRef.current;
       holdSecondsRef.current.push(Math.max(0, Math.round(elapsed)));
     }
@@ -482,7 +486,7 @@ export default function App() {
     metronomeLastSecRef.current = -1;
     audio.playPhaseStart('rest', settings.sound);
     triggerVibe([60, 40, 60]);
-    phaseStartRef.current = performance.now() / 1000;
+    phaseStartRef.current = Date.now() / 1000;
     phaseElapsedBeforePauseRef.current = 0;
   };
 

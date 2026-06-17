@@ -8,3 +8,9 @@ coverage/
 !.env.example
 *.apk
 custom_logos/
+
+# Personal physio / ACL rehab plans — private medical data, never commit.
+# physio-plan/ holds the source guide PDF; acl-*.json are personal level prescriptions.
+# (templates/my-exercises.json is a generic example and stays tracked.)
+physio-plan/
+templates/acl-*.json
