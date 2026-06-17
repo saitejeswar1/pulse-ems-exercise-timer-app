@@ -15,6 +15,8 @@ export interface WorkoutSettings {
   wakelock: boolean;
   aiInsightsEnabled?: boolean; // opt-in; default false
   aiInsightsAutoDay?: number | null; // 0=Sun..6=Sat for weekly auto-refresh, null=manual only
+  reminderEnabled?: boolean; // opt-in adherence nudge; default false
+  reminderTime?: string; // "HH:MM" 24h local deadline; nudge fires then if no session logged that day
 }
 
 export type WorkoutPhase = 'idle' | 'active' | 'rest' | 'transition' | 'done';
@@ -41,6 +43,7 @@ export interface PhysioExercise {
   weekdays?: string[]; // e.g. ['Mon', 'Wed', 'Fri'] for Day-wise scheduling
   weeklyTarget?: number; // e.g. 3 times per week
   locations?: ExerciseLocation[]; // where this can be performed; omitted = unspecified
+  defaultWeightKg?: number; // last/typical load in kilograms; 0 or undefined = bodyweight
   notes?: string;
 }
 
@@ -54,4 +57,6 @@ export interface WorkoutLogEntry {
   cyclesCompleted: number;
   totalActiveSeconds: number;
   bestHoldSeconds?: number; // hold-mode only: longest single hold in the session
+  weightKg?: number; // load used (0 or undefined = bodyweight)
+  repsPerSetUsed?: number; // copy of the exercise's repsPerSet at time of logging (for trend display)
 }

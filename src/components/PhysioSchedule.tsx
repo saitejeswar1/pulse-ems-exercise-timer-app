@@ -16,6 +16,8 @@ interface PhysioScheduleProps {
   onSelectExercise: (ex: PhysioExercise) => void;
   onImportExercises: (exs: ImportedExercise[], mode: 'append' | 'replace') => void;
   onReorderExercise: (id: string, direction: 'up' | 'down') => void;
+  planIds: string[]; // ids currently in Today's Plan (the queue)
+  onToggleInPlan: (ex: PhysioExercise) => void;
 }
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -102,6 +104,8 @@ export default function PhysioSchedule({
   onSelectExercise,
   onImportExercises,
   onReorderExercise,
+  planIds,
+  onToggleInPlan,
 }: PhysioScheduleProps) {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -126,6 +130,7 @@ export default function PhysioSchedule({
   const [weeklyTarget, setWeeklyTarget] = useState(EMPTY_FORM.weeklyTarget);
   const [selectedLocations, setSelectedLocations] = useState<ExerciseLocation[]>(EMPTY_FORM.selectedLocations);
   const [notes, setNotes] = useState(EMPTY_FORM.notes);
+  const [defaultWeightKg, setDefaultWeightKg] = useState(0); // 0 = bodyweight
 
   const resetForm = () => {
     setName(EMPTY_FORM.name);
@@ -139,6 +144,7 @@ export default function PhysioSchedule({
     setWeeklyTarget(EMPTY_FORM.weeklyTarget);
     setSelectedLocations(EMPTY_FORM.selectedLocations);
     setNotes(EMPTY_FORM.notes);
+    setDefaultWeightKg(0);
     setEditingId(null);
   };
 
@@ -155,6 +161,7 @@ export default function PhysioSchedule({
     setWeeklyTarget(ex.weeklyTarget ?? 3);
     setSelectedLocations(ex.locations ?? []);
     setNotes(ex.notes ?? '');
+    setDefaultWeightKg(ex.defaultWeightKg ?? 0);
     setShowForm(true);
   };
 
@@ -194,6 +201,7 @@ export default function PhysioSchedule({
       weekdays: selectedDays.length > 0 ? selectedDays : undefined,
       weeklyTarget,
       locations: selectedLocations.length > 0 ? selectedLocations : undefined,
+      defaultWeightKg: defaultWeightKg > 0 ? defaultWeightKg : undefined,
       notes: notes.trim() || undefined,
     };
     if (editingId) {
@@ -663,6 +671,17 @@ export default function PhysioSchedule({
                   className="w-full px-3 py-2 text-sm bg-natural-bg border border-natural-border rounded-xl text-natural-dark font-mono text-center focus:outline-none"
                 />
               </div>
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[11px] font-bold text-natural-moss">Load (kg) — 0 = bodyweight</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.5"
+                  value={defaultWeightKg}
+                  onChange={e => setDefaultWeightKg(Math.max(0, parseFloat(e.target.value) || 0))}
+                  className="w-full px-3 py-2 text-sm bg-natural-bg border border-natural-border rounded-xl text-natural-dark font-mono text-center focus:outline-none"
+                />
+              </div>
             </div>
 
             {/* Day Wise Plan Scheduling */}
@@ -943,6 +962,9 @@ export default function PhysioSchedule({
                       {item.repsPerSet && (
                         <span>Reps: {item.repsPerSet}</span>
                       )}
+                      {typeof item.defaultWeightKg === 'number' && item.defaultWeightKg > 0 && (
+                        <span className="text-natural-moss font-semibold">{item.defaultWeightKg} kg</span>
+                      )}
                     </div>
 
                     {/* Weekday calendar overview badges */}
@@ -1022,18 +1044,26 @@ export default function PhysioSchedule({
                   </div>
                 </div>
 
-                <div className="border-t border-natural-bg/55 pt-3 mt-1 flex justify-end">
+                <div className="border-t border-natural-bg/55 pt-3 mt-1 flex justify-end gap-2">
                   <button
-                    id={`btn-load-${item.id}`}
+                    id={`btn-play-${item.id}`}
                     onClick={() => onSelectExercise(item)}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition duration-150 cursor-pointer ${
-                      isActive
-                        ? 'bg-natural-moss text-white shadow-sm'
-                        : 'bg-natural-bg text-natural-moss hover:bg-natural-border'
-                    }`}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition duration-150 cursor-pointer bg-natural-bg text-natural-moss hover:bg-natural-border"
                   >
                     <Play className="w-3.5 h-3.5 fill-current" />
-                    {isActive ? 'Loaded' : 'Load into Timer'}
+                    Play now
+                  </button>
+                  <button
+                    id={`btn-plan-${item.id}`}
+                    onClick={() => onToggleInPlan(item)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition duration-150 cursor-pointer ${
+                      planIds.includes(item.id)
+                        ? 'bg-natural-moss text-white shadow-sm'
+                        : 'bg-natural-moss/10 text-natural-moss hover:bg-natural-moss/20'
+                    }`}
+                  >
+                    {planIds.includes(item.id) ? <Check className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
+                    {planIds.includes(item.id) ? 'In Plan' : 'Add to Today'}
                   </button>
                 </div>
               </motion.div>

@@ -10,7 +10,7 @@ const VALID_LOCATIONS: ExerciseLocation[] = ['home', 'gym'];
 const CSV_COLUMNS = [
   'name', 'category', 'mode',
   'activeDur', 'restDur', 'targetCycles', 'repsPerSet',
-  'weekdays', 'weeklyTarget', 'locations', 'notes',
+  'weekdays', 'weeklyTarget', 'locations', 'defaultWeightKg', 'notes',
 ] as const;
 
 function clampInt(v: unknown, min: number, max: number, fallback: number): number {
@@ -70,6 +70,10 @@ function normalizeOne(raw: any): ImportedExercise | null {
   }
   const locs = normalizeLocations(raw?.locations);
   if (locs) ex.locations = locs;
+  if (raw?.defaultWeightKg !== undefined && raw?.defaultWeightKg !== '') {
+    const w = parseFloat(String(raw.defaultWeightKg));
+    if (Number.isFinite(w) && w > 0) ex.defaultWeightKg = w;
+  }
   const notes = typeof raw?.notes === 'string' ? raw.notes.trim() : '';
   if (notes) ex.notes = notes;
 
