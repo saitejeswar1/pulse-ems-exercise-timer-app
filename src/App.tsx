@@ -1,13 +1,15 @@
 import { useState, useEffect, useRef } from 'react';
-import { Play, Pause, RotateCcw, Clock, Dumbbell, TrendingUp, Settings as SettingsIcon, Check, PlusCircle, CheckCircle2, CalendarCheck, SkipForward, X, Hourglass, Square } from 'lucide-react';
+import { Play, Pause, RotateCcw, Clock, Dumbbell, TrendingUp, Settings as SettingsIcon, Check, PlusCircle, CheckCircle2, CalendarCheck, SkipForward, X, Hourglass, Square, Plus, StopCircle, Pencil } from 'lucide-react';
 import { WorkoutSettings, WorkoutPhase, PhysioExercise, WorkoutLogEntry, ExerciseMode } from './types';
 import { audio } from './lib/audio';
+import { reconcileReminders } from './lib/reminders';
 import { App as CapacitorApp } from '@capacitor/app';
 import SettingsPanel from './components/SettingsPanel';
 import Waveform from './components/Waveform';
 import PhysioSchedule from './components/PhysioSchedule';
 import AnalyticsPanel from './components/AnalyticsPanel';
-import { motion, AnimatePresence } from 'motion/react';
+import PlanRow from './components/PlanRow';
+import { motion, AnimatePresence, Reorder } from 'motion/react';
 
 const DEFAULTS: WorkoutSettings = {
   activeDur: 15,
@@ -22,9 +24,17 @@ const DEFAULTS: WorkoutSettings = {
   wakelock: true,
   aiInsightsEnabled: false,
   aiInsightsAutoDay: 0, // Sunday — weekly reflection day
+  reminderEnabled: false,
+  reminderTime: '20:00',
 };
 
 const WEEKDAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+// Local YYYY-MM-DD used to stamp "today's plan" so we can detect a stale (yesterday's) plan.
+const todayDateString = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
 
 const INITIAL_EXERCISES: PhysioExercise[] = [
   {
@@ -111,6 +121,17 @@ export default function App() {
     return 0;
   });
 
+  // Date the current plan (queue) was built/last edited — stamped on every plan change so a
+  // plan left over from a previous day can surface a "start fresh?" banner.
+  const [planDate, setPlanDate] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem('pulse-queue-date');
+    } catch (e) {
+      return null;
+    }
+  });
+  const [showStalePlan, setShowStalePlan] = useState(false);
+
   const activeExerciseId = queue[queueIndex] ?? null;
 
   // Analytics Logs State
@@ -129,7 +150,11 @@ export default function App() {
   // Wake lock ref to resist garbage collection
   const wakeLockRef = useRef<any>(null);
 
-  // Timekeepers for requestAnimationFrame delta tracking
+  // Timekeepers for requestAnimationFrame delta tracking.
+  // NOTE: these MUST use Date.now() (wall clock), not performance.now(). On Android the
+  // monotonic clock behind performance.now() freezes while the device is in deep sleep
+  // (screen locked / pocket), so a locked phone would under-count the timer. Date.now()
+  // keeps advancing through suspend, so on unlock the next tick recovers the true elapsed time.
   const phaseStartRef = useRef<number>(0);
   const phaseElapsedBeforePauseRef = useRef<number>(0);
   const rafRef = useRef<number | null>(null);
@@ -140,6 +165,9 @@ export default function App() {
 
   // Hold-mode: per-set elapsed seconds recorded when the user taps Stop
   const holdSecondsRef = useRef<number[]>([]);
+  // Timestamp of when the current sitting began — scopes the end-of-session summary to just
+  // this workout (not earlier sessions logged the same day). In-memory like `phase`.
+  const sessionStartRef = useRef<number>(0);
 
   // Derived current exercise & mode
   const currentExercise = activeExerciseId
@@ -165,9 +193,39 @@ export default function App() {
 
   useEffect(() => {
     try {
+      if (planDate) localStorage.setItem('pulse-queue-date', planDate);
+      else localStorage.removeItem('pulse-queue-date');
+    } catch (e) {}
+  }, [planDate]);
+
+  // Midnight roll-over: if a plan built on an earlier day is still loaded, surface a
+  // "yesterday's plan — start fresh?" banner. Checked on mount and on app resume.
+  useEffect(() => {
+    const checkStalePlan = () => {
+      setShowStalePlan(
+        queue.length > 0 && !running && planDate != null && planDate !== todayDateString()
+      );
+    };
+    checkStalePlan();
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') checkStalePlan();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [queue.length, planDate, running]);
+
+  useEffect(() => {
+    try {
       localStorage.setItem('pulse-logs', JSON.stringify(logs));
     } catch (e) {}
   }, [logs]);
+
+  // Adherence nudge: re-sync the scheduled reminders whenever logs change (a freshly logged
+  // session cancels today's nudge) or the reminder settings change. Also runs on mount.
+  useEffect(() => {
+    reconcileReminders(settings, logs);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [logs, settings.reminderEnabled, settings.reminderTime]);
 
   // --------- Volume and Theme update ---------
   useEffect(() => {
@@ -266,6 +324,8 @@ export default function App() {
       : cyclesVal * settings.activeDur;
     // Reset hold tracker for the next exercise / next workout
     holdSecondsRef.current = [];
+    const weightKg = exerciseObj?.defaultWeightKg;
+    const repsPerSetUsed = exerciseObj?.repsPerSet;
     const newEntry: WorkoutLogEntry = {
       id: `log-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
       timestamp: Date.now(),
@@ -276,6 +336,8 @@ export default function App() {
       cyclesCompleted: cyclesVal,
       totalActiveSeconds,
       bestHoldSeconds,
+      weightKg: typeof weightKg === 'number' && weightKg > 0 ? weightKg : undefined,
+      repsPerSetUsed,
     };
     setLogs(prev => [...prev, newEntry]);
   };
@@ -287,7 +349,7 @@ export default function App() {
       return;
     }
 
-    phaseStartRef.current = performance.now() / 1000;
+    phaseStartRef.current = Date.now() / 1000;
 
     const tick = () => {
       // Prefer the loaded exercise's own params over the global settings.
@@ -296,7 +358,7 @@ export default function App() {
       const targetCyc = currentExercise?.targetCycles ?? settings.targetCycles;
       const interRest = settings.interExerciseRest;
 
-      const now = performance.now() / 1000;
+      const now = Date.now() / 1000;
       const elapsed = (now - phaseStartRef.current) + phaseElapsedBeforePauseRef.current;
       const isRepActive = phase === 'active' && currentMode === 'reps';
       const isHoldActive = phase === 'active' && currentMode === 'hold';
@@ -351,7 +413,7 @@ export default function App() {
           metronomeLastSecRef.current = -1;
           audio.playPhaseStart('rest', settings.sound);
           triggerVibe([60, 40, 60]);
-          phaseStartRef.current = performance.now() / 1000;
+          phaseStartRef.current = Date.now() / 1000;
           phaseElapsedBeforePauseRef.current = 0;
         } else if (phase === 'rest') {
           // Rest done → cycle complete
@@ -370,7 +432,7 @@ export default function App() {
               metronomeLastSecRef.current = -1;
               audio.playPhaseStart('rest', settings.sound);
               triggerVibe([60, 40, 60]);
-              phaseStartRef.current = performance.now() / 1000;
+              phaseStartRef.current = Date.now() / 1000;
               phaseElapsedBeforePauseRef.current = 0;
               return;
             }
@@ -391,7 +453,7 @@ export default function App() {
           metronomeLastSecRef.current = -1;
           audio.playPhaseStart('active', settings.sound);
           triggerVibe([60, 40, 60]);
-          phaseStartRef.current = performance.now() / 1000;
+          phaseStartRef.current = Date.now() / 1000;
           phaseElapsedBeforePauseRef.current = 0;
         } else if (phase === 'transition') {
           // Inter-exercise rest done → advance to next exercise
@@ -405,7 +467,7 @@ export default function App() {
           metronomeLastSecRef.current = -1;
           audio.playPhaseStart('active', settings.sound);
           triggerVibe([60, 40, 60]);
-          phaseStartRef.current = performance.now() / 1000;
+          phaseStartRef.current = Date.now() / 1000;
           phaseElapsedBeforePauseRef.current = 0;
         }
       }
@@ -425,7 +487,7 @@ export default function App() {
     if (running) {
       // Pause
       setRunning(false);
-      const currentTime = performance.now() / 1000;
+      const currentTime = Date.now() / 1000;
       phaseElapsedBeforePauseRef.current += currentTime - phaseStartRef.current;
       audio.stopContinuousTone();
       releaseWakeLockState();
@@ -435,7 +497,9 @@ export default function App() {
       requestWakeLockState();
 
       if (phase === 'idle' || phase === 'done') {
-        // Fresh start — if there's a multi-exercise queue, restart from the first one
+        // Fresh start — mark the sitting's start so the summary covers only this workout.
+        sessionStartRef.current = Date.now();
+        // if there's a multi-exercise queue, restart from the first one
         if (queue.length > 0) {
           setQueueIndex(0);
           const firstEx = exercises.find(e => e.id === queue[0]);
@@ -465,7 +529,7 @@ export default function App() {
     metronomeLastSecRef.current = -1;
     audio.playPhaseStart('active', settings.sound);
     triggerVibe([60, 40, 60]);
-    phaseStartRef.current = performance.now() / 1000;
+    phaseStartRef.current = Date.now() / 1000;
     phaseElapsedBeforePauseRef.current = 0;
   };
 
@@ -473,7 +537,7 @@ export default function App() {
   const handleCompleteSet = () => {
     if (!running || phase !== 'active' || (currentMode !== 'reps' && currentMode !== 'hold')) return;
     if (currentMode === 'hold') {
-      const now = performance.now() / 1000;
+      const now = Date.now() / 1000;
       const elapsed = (now - phaseStartRef.current) + phaseElapsedBeforePauseRef.current;
       holdSecondsRef.current.push(Math.max(0, Math.round(elapsed)));
     }
@@ -482,7 +546,7 @@ export default function App() {
     metronomeLastSecRef.current = -1;
     audio.playPhaseStart('rest', settings.sound);
     triggerVibe([60, 40, 60]);
-    phaseStartRef.current = performance.now() / 1000;
+    phaseStartRef.current = Date.now() / 1000;
     phaseElapsedBeforePauseRef.current = 0;
   };
 
@@ -509,6 +573,25 @@ export default function App() {
     metronomeLastSecRef.current = -1;
   };
 
+  // End today's session early. Logs whatever's in progress, finishes the workout, and shows
+  // the recap — the same wrap-up the tick loop runs when the whole plan auto-completes.
+  const handleEndSession = () => {
+    if (phase === 'idle' || phase === 'done') return;
+    if (cycles > 0) logWorkoutSession(cycles);
+    setRunning(false);
+    audio.stopContinuousTone();
+    releaseWakeLockState();
+    setPhase('done');
+    setCycles(0);
+    holdSecondsRef.current = [];
+    setProgressPercent(100);
+    phaseElapsedBeforePauseRef.current = 0;
+    lastCountdownTickRef.current = -1;
+    metronomeLastSecRef.current = -1;
+    audio.playWorkoutComplete();
+    triggerVibe([100, 60, 100, 60, 200]);
+  };
+
   // Safe visual clean labels
   const getPhaseName = () => {
     if (phase === 'idle') return 'Standing By';
@@ -522,6 +605,34 @@ export default function App() {
   const upNextExercise = phase === 'transition'
     ? exercises.find(e => e.id === queue[queueIndex + 1])
     : undefined;
+
+  // End-of-session recap, scoped to this sitting (logs since the session started). Rendered
+  // when phase === 'done', so it covers both a fully-completed plan and an early End Session.
+  const sessionSummary = (() => {
+    const sessionLogs = sessionStartRef.current > 0
+      ? logs.filter(l => l.timestamp >= sessionStartRef.current)
+      : [];
+    const exerciseCount = sessionLogs.length;
+    const totalSets = sessionLogs.reduce((a, l) => a + (l.cyclesCompleted || 0), 0);
+    const totalActiveSec = sessionLogs.reduce((a, l) => a + (l.totalActiveSeconds || 0), 0);
+    const mins = Math.floor(totalActiveSec / 60);
+    const secs = totalActiveSec % 60;
+    const timeLabel = totalActiveSec === 0
+      ? '0s'
+      : mins > 0 ? (secs > 0 ? `${mins}m ${secs}s` : `${mins}m`) : `${secs}s`;
+    const planned = queue.length;
+    let message: string;
+    if (exerciseCount === 0) {
+      message = 'Session ended — nothing logged this time. That’s okay, rest up.';
+    } else if (planned > 0 && exerciseCount >= planned) {
+      message = 'Nice work — you finished today’s plan. 💪';
+    } else if (planned > 0) {
+      message = `Good session — ${exerciseCount} of ${planned} planned done. Rest up. 💪`;
+    } else {
+      message = 'Session logged. Rest up. 💪';
+    }
+    return { exerciseCount, totalSets, timeLabel, message };
+  })();
 
   // Handlers for exercises schedule
   const handleAddExercise = (newEx: Omit<PhysioExercise, 'id'>) => {
@@ -589,12 +700,93 @@ export default function App() {
     });
   };
 
+  // Play-now: replace the whole plan with this single exercise and jump to the timer.
   const handleSelectExercise = (ex: PhysioExercise) => {
     setQueue([ex.id]);
     setQueueIndex(0);
+    setPlanDate(todayDateString());
+    setShowStalePlan(false);
     loadExerciseIntoSettings(ex);
     handleReset();
     setCurrentView('timer');
+  };
+
+  // Tap a tile to add/remove it from Today's Plan (the queue). Adding the first exercise
+  // also loads its timing so the dial reflects it.
+  const handleToggleInPlan = (ex: PhysioExercise) => {
+    if (queue.includes(ex.id)) {
+      handleRemoveFromPlan(ex.id);
+      return;
+    }
+    setQueue(prev => {
+      if (prev.includes(ex.id)) return prev;
+      if (prev.length === 0) loadExerciseIntoSettings(ex);
+      return [...prev, ex.id];
+    });
+    setPlanDate(todayDateString());
+    setShowStalePlan(false);
+  };
+
+  // Bulk-append a group of exercises (e.g. today's scheduled), preserving order and
+  // skipping any already in the plan.
+  const handleAddGroupToPlan = (group: PhysioExercise[]) => {
+    const ids = group.map(e => e.id);
+    if (ids.length === 0) return;
+    setQueue(prev => {
+      const merged = [...prev];
+      for (const id of ids) if (!merged.includes(id)) merged.push(id);
+      if (prev.length === 0 && merged.length > 0) {
+        const first = exercises.find(e => e.id === merged[0]);
+        if (first) loadExerciseIntoSettings(first);
+      }
+      return merged;
+    });
+    setPlanDate(todayDateString());
+    setShowStalePlan(false);
+  };
+
+  // Remove one exercise from the plan, keeping queueIndex pointing at the same item.
+  const handleRemoveFromPlan = (id: string) => {
+    setQueue(prev => {
+      const idx = prev.indexOf(id);
+      if (idx < 0) return prev;
+      const next = prev.filter(qid => qid !== id);
+      setQueueIndex(qi => {
+        if (next.length === 0) return 0;
+        if (idx < qi) return qi - 1;
+        return Math.min(qi, next.length - 1);
+      });
+      if (next.length === 0) setPlanDate(null);
+      return next;
+    });
+  };
+
+  // Tap-to-edit the current exercise's load via a quick prompt (0 = bodyweight).
+  const handleEditWeight = (id: string) => {
+    const ex = exercises.find(e => e.id === id);
+    if (!ex) return;
+    const cur = typeof ex.defaultWeightKg === 'number' ? ex.defaultWeightKg : 0;
+    const input = window.prompt(`Load for "${ex.name}" in kg (0 = bodyweight):`, String(cur));
+    if (input == null) return;
+    const val = parseFloat(input);
+    const next = Number.isFinite(val) && val > 0 ? val : 0;
+    setExercises(prev => prev.map(e => (e.id === id ? { ...e, defaultWeightKg: next } : e)));
+  };
+
+  // Reorder the plan via drag. Only reachable before a run starts (drag handle is hidden
+  // while running) and Start resets queueIndex to 0, so there's no run position to fix up.
+  const handleReorderPlan = (next: string[]) => {
+    setQueue(next);
+    setPlanDate(todayDateString());
+    setShowStalePlan(false);
+  };
+
+  // Start the built plan from the top. Reuses the play/pause fresh-start path.
+  const handleStartPlan = () => {
+    if (queue.length === 0) return;
+    setShowStalePlan(false);
+    if (phase !== 'idle' && phase !== 'done') handleReset();
+    if (!running) handlePlayPause();
   };
 
   // Today's auto-loaded program (based on device timezone weekday)
@@ -639,25 +831,17 @@ export default function App() {
     // idle
     const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
     const doneToday = logs.filter(l => l.timestamp >= startOfDay.getTime()).length;
-    const planned = todaysExercises.length;
+    const planned = queue.length;
     if (planned > 0) return `v1.2 · offline · ${doneToday} of ${planned} done today`;
     if (doneToday > 0) return `v1.2 · offline · ${doneToday} session${doneToday === 1 ? '' : 's'} today`;
     return 'v1.2 · offline · no accounts';
   })();
 
-  const handleStartTodaysProgram = () => {
-    if (todaysExercises.length === 0) return;
-    const ids = todaysExercises.map(e => e.id);
-    setQueue(ids);
-    setQueueIndex(0);
-    loadExerciseIntoSettings(todaysExercises[0]);
-    handleReset();
-    setCurrentView('timer');
-  };
-
   const handleClearQueue = () => {
     setQueue([]);
     setQueueIndex(0);
+    setPlanDate(null);
+    setShowStalePlan(false);
     handleReset();
   };
 
@@ -754,91 +938,151 @@ export default function App() {
                 transition={{ duration: 0.15 }}
                 className="flex flex-col gap-6"
               >
-                {/* Today's Program / Queue panel */}
+                {/* Stale-plan (built on an earlier day) prompt */}
+                {showStalePlan && (
+                  <div className="p-3.5 bg-natural-terracotta/10 border border-natural-terracotta/30 rounded-xl flex items-center gap-3">
+                    <CalendarCheck className="w-4 h-4 text-natural-terracotta flex-shrink-0" />
+                    <p className="text-[11px] text-natural-dark flex-1 leading-snug">
+                      This plan is from an earlier day. Start fresh for today?
+                    </p>
+                    <button
+                      onClick={handleClearQueue}
+                      className="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-natural-terracotta text-white hover:bg-[#C27A62] transition cursor-pointer flex-shrink-0"
+                    >
+                      Start fresh
+                    </button>
+                    <button
+                      onClick={() => { setPlanDate(todayDateString()); setShowStalePlan(false); }}
+                      className="px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider text-[#70706B] hover:text-natural-dark transition cursor-pointer flex-shrink-0"
+                    >
+                      Keep
+                    </button>
+                  </div>
+                )}
+
+                {/* Today's Plan — manually built session */}
                 {queue.length === 0 ? (
-                  todaysExercises.length > 0 ? (
-                    <div className="p-4 bg-natural-moss/5 border border-natural-moss/25 rounded-xl flex flex-col gap-2.5">
-                      <div className="flex items-center gap-2">
-                        <CalendarCheck className="w-4 h-4 text-natural-moss" />
-                        <span className="text-[11px] font-bold uppercase tracking-wider text-natural-moss">
-                          {todayShort}'s Program — {todaysExercises.length} exercise{todaysExercises.length === 1 ? '' : 's'}
-                        </span>
-                      </div>
-                      <div className="flex flex-col gap-1">
-                        {todaysExercises.map((ex, i) => (
-                          <div key={ex.id} className="flex items-center gap-2 text-[11px]">
-                            <span className="w-4 h-4 rounded-full bg-natural-moss text-white font-bold text-[9px] flex items-center justify-center flex-shrink-0">
-                              {i + 1}
-                            </span>
-                            <span className="font-semibold text-natural-dark truncate">{ex.name}</span>
-                            <span className="font-mono text-[10px] text-[#757570] ml-auto whitespace-nowrap">
-                              {(ex.mode ?? 'time') === 'reps' ? `${ex.repsPerSet ?? '?'} reps` : `${ex.activeDur}s`} × {ex.targetCycles}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                      <motion.button
-                        onClick={handleStartTodaysProgram}
-                        whileTap={{ scale: 0.97 }}
-                        className="mt-1 w-full py-2.5 bg-natural-moss hover:bg-[#4E4E36] text-white rounded-xl text-xs font-bold uppercase tracking-wider transition cursor-pointer flex items-center justify-center gap-1.5"
+                  <div className="p-4 bg-natural-moss/5 border border-natural-moss/25 rounded-xl flex flex-col gap-3">
+                    <div className="flex items-center gap-2">
+                      <CalendarCheck className="w-4 h-4 text-natural-moss" />
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-natural-moss">
+                        Today's Plan
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-[#70706B] leading-relaxed">
+                      Build today's session — add exercises, then tap Start. Nothing's queued yet.
+                    </p>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {todaysExercises.length > 0 && (
+                        <button
+                          onClick={() => handleAddGroupToPlan(todaysExercises)}
+                          className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide bg-white border border-natural-moss/40 text-natural-moss hover:bg-natural-moss/10 transition cursor-pointer"
+                        >
+                          <Plus className="w-3 h-3" /> {todayShort}'s scheduled ({todaysExercises.length})
+                        </button>
+                      )}
+                      <button
+                        onClick={() => setCurrentView('schedule')}
+                        className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide text-[#70706B] hover:text-natural-dark transition cursor-pointer"
                       >
-                        <Play className="w-3.5 h-3.5 fill-current" />
-                        Load Today's Program
-                      </motion.button>
+                        <PlusCircle className="w-3.5 h-3.5" /> Browse &amp; add exercises
+                      </button>
                     </div>
-                  ) : (
-                    <div className="p-3.5 bg-natural-bg/70 border border-dashed border-natural-border rounded-xl text-center">
-                      <p className="text-[11px] text-[#70706B]">
-                        No exercises scheduled for {todayShort}. Pick one from the <strong className="text-natural-moss">Program</strong> tab.
-                      </p>
-                    </div>
-                  )
+                  </div>
                 ) : (
-                  <div className="p-3.5 bg-natural-moss/5 border border-natural-moss/25 rounded-xl flex flex-col gap-2">
+                  <div className="p-4 bg-natural-moss/5 border border-natural-moss/25 rounded-xl flex flex-col gap-3">
                     <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2 min-w-0 flex-1">
-                        <Dumbbell className="w-4 h-4 text-natural-moss flex-shrink-0" />
-                        <div className="flex flex-col min-w-0">
-                          <span className="text-[9px] font-bold uppercase tracking-wider text-natural-moss/80">
-                            {queue.length > 1 ? `Now — ${queueIndex + 1} / ${queue.length}` : 'Loaded'}
-                          </span>
-                          <span className="text-sm font-bold text-natural-dark truncate">
-                            {currentExercise?.name ?? 'Exercise'}
-                          </span>
-                        </div>
+                      <div className="flex items-center gap-2 min-w-0">
+                        <CalendarCheck className="w-4 h-4 text-natural-moss flex-shrink-0" />
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-natural-moss">
+                          Today's Plan — {queue.length} exercise{queue.length === 1 ? '' : 's'}
+                          {running && queue.length > 1 && (
+                            <span className="text-natural-moss/70"> · now {queueIndex + 1}/{queue.length}</span>
+                          )}
+                        </span>
                       </div>
                       <button
                         onClick={handleClearQueue}
                         className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] text-[#70706B] hover:text-natural-terracotta hover:bg-natural-terracotta/10 font-bold uppercase tracking-wider transition cursor-pointer flex-shrink-0"
-                        aria-label="Unload routine"
+                        aria-label="Clear plan"
                       >
                         <X className="w-3 h-3" />
-                        {queue.length > 1 ? 'Clear' : 'Unload'}
+                        Clear
                       </button>
                     </div>
-                    {queue.length > 1 && (
-                      <div className="flex gap-1 overflow-x-auto">
-                        {queue.map((qid, i) => {
-                          const ex = exercises.find(e => e.id === qid);
-                          if (!ex) return null;
-                          const done = i < queueIndex || phase === 'done';
-                          const current = i === queueIndex && phase !== 'done';
-                          return (
-                            <div
-                              key={qid}
-                              className={`flex-shrink-0 px-2.5 py-1 rounded-lg text-[10px] font-bold border ${
-                                current
-                                  ? 'bg-natural-moss text-white border-natural-moss'
-                                  : done
-                                    ? 'bg-natural-moss/10 text-natural-moss border-natural-moss/30 line-through'
-                                    : 'bg-white text-[#70706B] border-natural-border'
-                              }`}
-                            >
-                              {i + 1}. {ex.name}
-                            </div>
-                          );
-                        })}
+
+                    {/* Plan items — drag the grip to reorder (disabled once running) */}
+                    <Reorder.Group
+                      axis="y"
+                      values={queue}
+                      onReorder={handleReorderPlan}
+                      className="flex flex-col gap-1.5"
+                    >
+                      {queue.map((qid, i) => {
+                        const ex = exercises.find(e => e.id === qid);
+                        if (!ex) return null;
+                        const done = i < queueIndex || phase === 'done';
+                        const current = i === queueIndex && phase !== 'done';
+                        return (
+                          <PlanRow
+                            key={qid}
+                            id={qid}
+                            ex={ex}
+                            index={i}
+                            done={done}
+                            current={current}
+                            running={running}
+                            onRemove={handleRemoveFromPlan}
+                          />
+                        );
+                      })}
+                    </Reorder.Group>
+
+                    {/* Load (weight) pill for the current exercise — tap to edit */}
+                    {currentExercise && (
+                      <button
+                        onClick={() => handleEditWeight(currentExercise.id)}
+                        className="self-start flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold border border-natural-moss/30 bg-white text-natural-moss hover:bg-natural-moss/10 transition cursor-pointer"
+                        aria-label="Edit weight"
+                      >
+                        <Dumbbell className="w-3 h-3" />
+                        {typeof currentExercise.defaultWeightKg === 'number' && currentExercise.defaultWeightKg > 0
+                          ? `${currentExercise.defaultWeightKg} kg`
+                          : 'Bodyweight'}
+                        <Pencil className="w-2.5 h-2.5 opacity-60" />
+                      </button>
+                    )}
+
+                    {/* Add more */}
+                    {!running && (
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {todaysExercises.length > 0 && (
+                          <button
+                            onClick={() => handleAddGroupToPlan(todaysExercises)}
+                            className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide bg-white border border-natural-moss/40 text-natural-moss hover:bg-natural-moss/10 transition cursor-pointer"
+                          >
+                            <Plus className="w-3 h-3" /> {todayShort}'s scheduled
+                          </button>
+                        )}
+                        <button
+                          onClick={() => setCurrentView('schedule')}
+                          className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide text-[#70706B] hover:text-natural-dark transition cursor-pointer"
+                        >
+                          <PlusCircle className="w-3 h-3" /> More
+                        </button>
                       </div>
+                    )}
+
+                    {/* Start / Restart */}
+                    {!running && (
+                      <motion.button
+                        onClick={handleStartPlan}
+                        whileTap={{ scale: 0.97 }}
+                        className="w-full py-2.5 bg-natural-moss hover:bg-[#4E4E36] text-white rounded-xl text-xs font-bold uppercase tracking-wider transition cursor-pointer flex items-center justify-center gap-1.5"
+                      >
+                        <Play className="w-3.5 h-3.5 fill-current" />
+                        {phase === 'done' ? 'Restart Plan' : 'Start Plan'}
+                      </motion.button>
                     )}
                   </div>
                 )}
@@ -1005,19 +1249,55 @@ export default function App() {
                   </motion.button>
                 </div>
 
-                {/* Manual completion save indicator if they paused inside a workout */}
-                {cycles > 0 && !running && phase !== 'done' && (
+                {/* Session recap — shown after a session ends (End Session or full completion) */}
+                {phase === 'done' && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="p-4 bg-natural-moss/5 border border-natural-moss/25 rounded-xl flex flex-col gap-3"
+                  >
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4 text-natural-moss flex-shrink-0" />
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-natural-moss">
+                        Session Complete
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="flex flex-col items-center">
+                        <span className="text-lg font-black font-mono text-natural-dark leading-none">{sessionSummary.exerciseCount}</span>
+                        <span className="text-[9px] text-[#70706B] uppercase font-bold tracking-wider mt-1">
+                          Exercise{sessionSummary.exerciseCount === 1 ? '' : 's'}
+                        </span>
+                      </div>
+                      <div className="flex flex-col items-center">
+                        <span className="text-lg font-black font-mono text-natural-dark leading-none">{sessionSummary.totalSets}</span>
+                        <span className="text-[9px] text-[#70706B] uppercase font-bold tracking-wider mt-1">
+                          Set{sessionSummary.totalSets === 1 ? '' : 's'}
+                        </span>
+                      </div>
+                      <div className="flex flex-col items-center">
+                        <span className="text-lg font-black font-mono text-natural-dark leading-none">{sessionSummary.timeLabel}</span>
+                        <span className="text-[9px] text-[#70706B] uppercase font-bold tracking-wider mt-1">
+                          Under Tension
+                        </span>
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-natural-dark leading-snug text-center">
+                      {sessionSummary.message}
+                    </p>
+                  </motion.div>
+                )}
+
+                {/* End today's session early — logs in-progress work and finishes */}
+                {phase !== 'idle' && phase !== 'done' && (
                   <motion.button
                     initial={{ opacity: 0, y: 5 }}
                     animate={{ opacity: 1, y: 0 }}
-                    onClick={() => {
-                      logWorkoutSession(cycles);
-                      handleReset();
-                    }}
-                    className="w-full py-3 bg-natural-moss/10 border border-natural-moss/20 hover:bg-natural-moss/15 text-natural-moss rounded-xl text-xs font-bold uppercase tracking-wider transition cursor-pointer flex items-center justify-center gap-1.5"
+                    onClick={handleEndSession}
+                    className="w-full py-3 bg-natural-terracotta/10 border border-natural-terracotta/30 hover:bg-natural-terracotta/15 text-natural-terracotta rounded-xl text-xs font-bold uppercase tracking-wider transition cursor-pointer flex items-center justify-center gap-1.5"
                   >
-                    <PlusCircle className="w-4 h-4" />
-                    Log Current {cycles} Cycles and Reset
+                    <StopCircle className="w-4 h-4" />
+                    End Session{cycles > 0 ? ` · Log ${cycles} Cycle${cycles === 1 ? '' : 's'}` : ''}
                   </motion.button>
                 )}
 
@@ -1072,6 +1352,8 @@ export default function App() {
                   onImportExercises={handleImportExercises}
                   onReorderExercise={handleReorderExercise}
                   onSelectExercise={handleSelectExercise}
+                  planIds={queue}
+                  onToggleInPlan={handleToggleInPlan}
                 />
               </motion.div>
             )}
